@@ -75,7 +75,7 @@ public class PaymentService {
         orderRequest.put("receipt", "rcpt_" + System.currentTimeMillis());
         orderRequest.put("payment_capture", 1);
 
-        Order razorpayOrder = razorpayClient.orders.create(orderRequest);
+        Order razorpayOrder = razorpayClient.Orders.create(orderRequest);
         String razorpayOrderId = razorpayOrder.get("id");
 
         log.info("Razorpay order created: orderId={}", razorpayOrderId);

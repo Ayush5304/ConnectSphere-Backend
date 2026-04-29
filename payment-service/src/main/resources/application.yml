@@ -3,26 +3,20 @@ spring:
     name: payment-service
   datasource:
     url: jdbc:mysql://localhost:3306/paymentdb?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true
-    username: YOUR_DB_USERNAME
-    password: YOUR_DB_PASSWORD
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
   jpa:
     hibernate:
       ddl-auto: update
-  boot:
-    admin:
-      client:
-        url: http://localhost:9090
-        username: admin
-        password: admin123
 
 server:
   port: 8089
 
 razorpay:
   key:
-    id: YOUR_RAZORPAY_KEY_ID
-    secret: YOUR_RAZORPAY_KEY_SECRET
+    id: ${RAZORPAY_KEY_ID}
+    secret: ${RAZORPAY_KEY_SECRET}
 
 auth:
   service:

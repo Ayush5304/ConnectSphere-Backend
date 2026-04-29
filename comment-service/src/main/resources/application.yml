@@ -1,12 +1,12 @@
 server:
-  port: 8082
+  port: 8083
 
 spring:
   application:
-    name: post-service
+    name: comment-service
 
   datasource:
-    url: jdbc:mysql://localhost:3306/connectsphere_post_db?createDatabaseIfNotExist=true
+    url: jdbc:mysql://localhost:3306/connectsphere_comment_db?createDatabaseIfNotExist=true
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -16,6 +16,7 @@ spring:
       ddl-auto: update
     show-sql: true
 
+# Eureka Configuration
 eureka:
   client:
     service-url:
@@ -24,16 +25,16 @@ eureka:
   instance:
     prefer-ip-address: true
 
-# ✅ FIX ADDED HERE
+# 🔗 Inter-service communication
 auth:
   service:
     url: http://localhost:8081
- 
- # (optional - keep if needed)
-search:
-  service:
-    url: http://localhost:8083
 
+post:
+  service:
+    url: http://localhost:8082
+
+# Logging
 logging:
   level:
     com.connectsphere: DEBUG
