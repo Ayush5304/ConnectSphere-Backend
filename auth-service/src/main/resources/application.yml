@@ -42,6 +42,13 @@ app:
   frontend:
     url: http://localhost:3000
 
+connectsphere:
+  admin:
+    email: 0191cs221060@technocratsgroup.edu.in
+    password: admin123
+    username: admin
+    full-name: ConnectSphere Admin
+
 eureka:
   client:
     service-url:

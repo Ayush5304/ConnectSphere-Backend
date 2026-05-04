@@ -165,6 +165,19 @@ public class AuthResource {
         return ResponseEntity.ok().build();
     }
 
+    /**
+     * PUT /auth/user/verify-by-email?email=user@example.com
+     *
+     * BUG-FIX: payment-service calls this endpoint after a successful
+     * VERIFIED_BADGE payment, but this endpoint was missing.
+     * The payment would succeed but the badge would never be granted.
+     */
+    @PutMapping("/user/verify-by-email")
+    public ResponseEntity<Void> verifyUserByEmail(@RequestParam String email) {
+        authService.verifyUserByEmail(email);
+        return ResponseEntity.ok().build();
+    }
+
     // ── Admin ─────────────────────────────────────────────────────────────────
 
     @GetMapping("/admin/users")
@@ -175,6 +188,17 @@ public class AuthResource {
     @GetMapping("/admin/analytics")
     public ResponseEntity<Map<String, Object>> analytics() {
         return ResponseEntity.ok(authService.getAnalytics());
+    }
+
+    @GetMapping("/admin/reported-users")
+    public ResponseEntity<List<User>> getReportedUsers() {
+        return ResponseEntity.ok(authService.getReportedUsers());
+    }
+
+    @PutMapping("/admin/users/{userId}/clear-report")
+    public ResponseEntity<Void> clearUserReport(@PathVariable Long userId) {
+        authService.clearUserReport(userId);
+        return ResponseEntity.noContent().build();
     }
 
     @PutMapping("/admin/users/{userId}/role")

@@ -44,6 +44,18 @@ public class AuthService {
     @Value("${spring.mail.username}")
     private String fromEmail;
 
+    @Value("${connectsphere.admin.email:}")
+    private String configuredAdminEmail;
+
+    @Value("${connectsphere.admin.password:}")
+    private String configuredAdminPassword;
+
+    @Value("${connectsphere.admin.username:admin}")
+    private String configuredAdminUsername;
+
+    @Value("${connectsphere.admin.full-name:ConnectSphere Admin}")
+    private String configuredAdminFullName;
+
     /**
      * Temporary in-memory store for pending OTP registrations.
      * Key = email, Value = registration data map.
@@ -183,9 +195,6 @@ public class AuthService {
         // Check uniqueness before sending OTP
         if (userRepository.existsByEmail(email))
             throw new BadRequestException("Email is already in use.");
-        if (userRepository.existsByUsername(username))
-            throw new BadRequestException("Username is already taken.");
-
         String otp = generateOtp();
 
         // Store pending registration data in memory
@@ -237,9 +246,6 @@ public class AuthService {
         // Re-check uniqueness in case someone registered in the meantime
         if (userRepository.existsByEmail(email))
             throw new BadRequestException("Email is already in use.");
-        if (userRepository.existsByUsername(regData.get("username")))
-            throw new BadRequestException("Username is already taken.");
-
         // Create the user
         User user = new User();
         user.setUsername(regData.get("username"));
@@ -291,9 +297,6 @@ public class AuthService {
 
         if (userRepository.existsByEmail(email))
             throw new BadRequestException("Email is already in use.");
-        if (userRepository.existsByUsername(username))
-            throw new BadRequestException("Username is already taken.");
-
         log.info("Registering new user: username={}, email={}", username, email);
 
         User user = new User();
@@ -319,9 +322,11 @@ public class AuthService {
         if (password == null || password.isBlank())
             throw new BadRequestException("Password is required.");
 
+        ensureConfiguredAdminForLogin(email, password);
+
         log.info("Login attempt for email={}", email);
 
-        User user = userRepository.findByEmail(email)
+        User user = userRepository.findByEmail(email.trim().toLowerCase())
                 .orElseThrow(() -> new BadRequestException("Invalid email or password."));
 
         if (!passwordEncoder.matches(password, user.getPasswordHash()))
@@ -337,6 +342,34 @@ public class AuthService {
 
         String token = jwtUtil.generateToken(user.getEmail(), user.getRole().name());
         return buildLoginResponse(user, token);
+    }
+
+    private void ensureConfiguredAdminForLogin(String email, String password) {
+        if (configuredAdminEmail == null || configuredAdminEmail.isBlank()
+                || configuredAdminPassword == null || configuredAdminPassword.isBlank()) {
+            return;
+        }
+
+        String requestedEmail = email.trim().toLowerCase();
+        String adminEmail = configuredAdminEmail.trim().toLowerCase();
+        if (!requestedEmail.equals(adminEmail) || !password.equals(configuredAdminPassword)) {
+            return;
+        }
+
+        User admin = userRepository.findByEmail(adminEmail).orElseGet(User::new);
+        if (admin.getUserId() == null) {
+            admin.setEmail(adminEmail);
+            admin.setUsername(configuredAdminUsername == null || configuredAdminUsername.isBlank()
+                    ? "admin" : configuredAdminUsername.trim());
+        }
+        admin.setPasswordHash(passwordEncoder.encode(configuredAdminPassword));
+        admin.setRole(User.Role.ADMIN);
+        admin.setActive(true);
+        admin.setFullName(configuredAdminFullName);
+        if (admin.getBio() == null || admin.getBio().isBlank()) {
+            admin.setBio("Monitoring ConnectSphere communities, reports, content, trends, and platform health.");
+        }
+        userRepository.save(admin);
     }
 
     private Map<String, String> buildLoginResponse(User user, String token) {
@@ -460,9 +493,37 @@ public class AuthService {
         userRepository.save(user);
     }
 
+    public List<User> getReportedUsers() {
+        return userRepository.findByReportedTrue();
+    }
+
+    public void clearUserReport(Long userId) {
+        User user = getUserById(userId);
+        user.setReported(false);
+        user.setReportReason(null);
+        userRepository.save(user);
+    }
+
     public void verifyUser(Long userId) {
         User user = getUserById(userId);
         user.setVerified(true);
         userRepository.save(user);
+    }
+
+    /**
+     * verifyUserByEmail() — Grant verified badge by email address.
+     *
+     * BUG-FIX: payment-service calls PUT /auth/user/verify-by-email?email=
+     * after a successful payment. This method was missing — the badge was
+     * never actually granted even after payment succeeded.
+     */
+    public void verifyUserByEmail(String email) {
+        if (email == null || email.isBlank())
+            throw new BadRequestException("Email is required.");
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new ResourceNotFoundException("No account found with email: " + email));
+        user.setVerified(true);
+        userRepository.save(user);
+        log.info("Verified badge granted via email: {}", email);
     }
 }

@@ -10,4 +10,5 @@ public interface CommentRepository extends JpaRepository<Comment, Long> {
     List<Comment> findByPostIdAndParentCommentIdIsNullAndDeletedFalseOrderByCreatedAtAsc(Long postId);
     List<Comment> findByParentCommentIdAndDeletedFalseOrderByCreatedAtAsc(Long parentCommentId);
     long countByPostIdAndDeletedFalse(Long postId);
+    List<Comment> findByReportedTrueOrderByCreatedAtDesc();
 }

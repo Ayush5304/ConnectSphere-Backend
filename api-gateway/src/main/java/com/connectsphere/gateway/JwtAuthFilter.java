@@ -26,30 +26,53 @@ public class JwtAuthFilter extends AbstractGatewayFilterFactory<JwtAuthFilter.Co
         this.jwtUtil = jwtUtil;
     }
 
-    // ✅ PUBLIC APIs (no JWT required)
-    private static final List<String> PUBLIC_PATHS = List.of(
+    // Public APIs. Mutating and admin endpoints stay protected even when their
+    // path starts with a public read prefix.
+    private static final List<String> PUBLIC_EXACT = List.of(
             "/api/auth/register",
             "/api/auth/login",
-            "/api/auth/otp/",
+            "/api/auth/guest",
+            "/api/auth/forgot-password",
+            "/api/auth/reset-password",
             "/api/auth/otp/login/request",
             "/api/auth/otp/login/verify",
             "/api/auth/otp/register/request",
             "/api/auth/otp/register/verify",
-            "/api/auth/guest",
-            "/api/auth/forgot-password",
-            "/api/auth/reset-password",
-            "/api/auth/user",
-            "/api/auth/search",
+            "/auth/register",
+            "/auth/login",
+            "/auth/guest",
+            "/auth/forgot-password",
+            "/auth/reset-password",
+            "/auth/otp/login/request",
+            "/auth/otp/login/verify",
+            "/auth/otp/register/request",
+            "/auth/otp/register/verify"
+    );
+
+    private static final List<String> PUBLIC_ANY_METHOD_PREFIXES = List.of(
+            "/media/files/",
             "/oauth2/",
             "/login/oauth2/",
-            "/posts/",
-            "/comments/",
-            "/likes/",
-            "/follows/",
-            "/search",
-            "/hashtags/",
-            "/media/files/",
             "/actuator"
+    );
+
+    private static final List<String> PUBLIC_GET_PREFIXES = List.of(
+            "/api/auth/user/",
+            "/api/auth/search",
+            "/api/posts",
+            "/api/comments",
+            "/api/likes",
+            "/api/follows",
+            "/api/search",
+            "/api/hashtags",
+            "/auth/user/",
+            "/auth/search",
+            "/posts",
+            "/comments",
+            "/likes",
+            "/follows",
+            "/search",
+            "/hashtags"
     );
 
     @Override
@@ -57,6 +80,7 @@ public class JwtAuthFilter extends AbstractGatewayFilterFactory<JwtAuthFilter.Co
         return (exchange, chain) -> {
 
             String path = exchange.getRequest().getURI().getPath();
+            HttpMethod method = exchange.getRequest().getMethod();
 
             // ✅ 1. Allow CORS preflight (VERY IMPORTANT)
             if (exchange.getRequest().getMethod() == HttpMethod.OPTIONS) {
@@ -67,7 +91,7 @@ public class JwtAuthFilter extends AbstractGatewayFilterFactory<JwtAuthFilter.Co
             System.out.println("Incoming Path: " + path);
 
             // ✅ 2. Allow public APIs
-            if (isPublic(path)) {
+            if (isPublic(path, method)) {
                 return chain.filter(exchange);
             }
 
@@ -114,9 +138,12 @@ public class JwtAuthFilter extends AbstractGatewayFilterFactory<JwtAuthFilter.Co
         };
     }
 
-    // ✅ FIXED PUBLIC PATH CHECK
-    private boolean isPublic(String path) {
-        return PUBLIC_PATHS.stream().anyMatch(p -> path.contains(p));
+    private boolean isPublic(String path, HttpMethod method) {
+        if (PUBLIC_EXACT.contains(path)) return true;
+        if (PUBLIC_ANY_METHOD_PREFIXES.stream().anyMatch(path::startsWith)) return true;
+        return HttpMethod.GET.equals(method)
+                && PUBLIC_GET_PREFIXES.stream().anyMatch(path::startsWith)
+                && !path.contains("/admin/");
     }
 
     private Mono<Void> unauthorized(ServerWebExchange exchange) {

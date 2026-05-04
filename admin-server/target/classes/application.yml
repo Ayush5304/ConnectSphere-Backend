@@ -7,8 +7,8 @@ spring:
 
   security:
     user:
-      name: admin
-      password: admin123   # you can change this
+      name: ${ADMIN_SERVER_USERNAME:0191cs221060@technocratsgroup.edu.in}
+      password: ${ADMIN_SERVER_PASSWORD:admin123}
 
 eureka:
   client:

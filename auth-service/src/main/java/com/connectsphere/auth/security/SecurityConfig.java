@@ -123,7 +123,8 @@ public class SecurityConfig {
                     "/auth/register", "/auth/login", "/auth/guest",
                     "/auth/forgot-password", "/auth/reset-password",
                     "/auth/otp/**",
-                    "/auth/user/**", "/auth/search", "/error"
+                    "/auth/user/**", "/auth/search", "/error",
+                    "/auth/user/verify-by-email"  // internal: payment-service grants badge
                 ).permitAll()
                 .anyRequest().authenticated())
             .exceptionHandling(e -> e

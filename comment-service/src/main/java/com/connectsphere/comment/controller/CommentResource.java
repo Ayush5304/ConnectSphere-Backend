@@ -78,6 +78,12 @@ public class CommentResource {
         return ResponseEntity.noContent().build();
     }
 
+    @PostMapping("/{id}/report")
+    public ResponseEntity<Void> report(@PathVariable Long id, @RequestBody Map<String, String> body) {
+        commentService.reportComment(id, body.get("reason"));
+        return ResponseEntity.ok().build();
+    }
+
     /** GET /comments/admin/all — Get all comments (Admin only) */
     @GetMapping("/admin/all")
     public ResponseEntity<List<Comment>> getAllComments() {
@@ -91,6 +97,17 @@ public class CommentResource {
     @DeleteMapping("/admin/{id}")
     public ResponseEntity<Void> adminDelete(@PathVariable Long id) {
         commentService.deleteComment(id);
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/admin/reported")
+    public ResponseEntity<List<Comment>> getReportedComments() {
+        return ResponseEntity.ok(commentService.getReportedComments());
+    }
+
+    @PutMapping("/admin/{id}/clear-report")
+    public ResponseEntity<Void> clearReport(@PathVariable Long id) {
+        commentService.clearReport(id);
         return ResponseEntity.noContent().build();
     }
 }

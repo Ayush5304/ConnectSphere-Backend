@@ -58,7 +58,8 @@ public class PaymentService {
         if (request.getType() == null) throw new BadRequestException("Payment type is required.");
         if (userEmail == null || userEmail.isBlank()) throw new BadRequestException("Authenticated user email is required.");
 
-        if (razorpayKeyId == null || razorpayKeyId.isBlank()
+        if (razorpayClient == null
+                || razorpayKeyId == null || razorpayKeyId.isBlank()
                 || razorpayKeySecret == null || razorpayKeySecret.isBlank()) {
             throw new BadRequestException("Payment gateway is not configured. Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET.");
         }

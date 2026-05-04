@@ -7,6 +7,8 @@ spring:
 
   cloud:
     gateway:
+      default-filters:
+        - JwtAuthFilter
       routes:
 
         - id: auth-service

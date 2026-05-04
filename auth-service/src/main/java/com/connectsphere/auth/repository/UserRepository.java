@@ -14,4 +14,5 @@ public interface UserRepository extends JpaRepository<User, Long> {
     long countByRole(User.Role role);
     Optional<User> findByResetToken(String resetToken);
     long countByLastLoginAtAfter(LocalDateTime since);
+    java.util.List<User> findByReportedTrue();
 }

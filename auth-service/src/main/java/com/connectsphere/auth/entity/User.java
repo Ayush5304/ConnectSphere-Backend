@@ -10,7 +10,7 @@ public class User {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long userId;
 
-    @Column(unique = true, nullable = false)
+    @Column(nullable = false)
     private String username;
 
     @Column(unique = true, nullable = false)
@@ -35,6 +35,7 @@ public class User {
     private boolean reported = false;
     private String reportReason;
     private boolean verified = false;
+    private boolean pendingRegistration = false;
 
     // ── OTP fields for login-via-OTP ──────────────────────────────────────────
     /** 6-digit OTP for email-based login */
@@ -78,6 +79,8 @@ public class User {
     public void setReportReason(String r) { this.reportReason = r; }
     public boolean isVerified() { return verified; }
     public void setVerified(boolean verified) { this.verified = verified; }
+    public boolean isPendingRegistration() { return pendingRegistration; }
+    public void setPendingRegistration(boolean pendingRegistration) { this.pendingRegistration = pendingRegistration; }
     public String getLoginOtp() { return loginOtp; }
     public void setLoginOtp(String otp) { this.loginOtp = otp; }
     public java.time.LocalDateTime getLoginOtpExpiry() { return loginOtpExpiry; }

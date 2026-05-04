@@ -1,24 +1,19 @@
 package com.connectsphere.notification.config;
 
-import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.web.servlet.config.annotation.CorsRegistry;
-import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
+/**
+ * CorsConfig — DISABLED in individual microservices.
+ *
+ * CORS is handled centrally by the API Gateway (CorsWebFilter in api-gateway).
+ * Having CORS configured in BOTH the gateway AND each service caused the
+ * "Access-Control-Allow-Origin contains multiple values" browser error,
+ * which blocked all API calls from the frontend.
+ *
+ * Each service runs behind the gateway, so the browser never talks to them
+ * directly — no CORS headers are needed here.
+ */
 @Configuration
 public class CorsConfig {
-
-    @Bean
-    public WebMvcConfigurer corsConfigurer() {
-        return new WebMvcConfigurer() {
-            @Override
-            public void addCorsMappings(CorsRegistry registry) {
-                registry.addMapping("/**")
-                        .allowedOrigins("http://localhost:3000")
-                        .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
-                        .allowedHeaders("*")
-                        .allowCredentials(true);
-            }
-        };
-    }
+    // intentionally empty — CORS handled by API Gateway only
 }

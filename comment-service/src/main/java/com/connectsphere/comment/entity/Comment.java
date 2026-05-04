@@ -57,6 +57,8 @@ public class Comment {
      * false = comment is visible (default)
      */
     private boolean deleted = false;
+    private boolean reported = false;
+    private String reportReason;
 
     /** createdAt — When the comment was created */
     private LocalDateTime createdAt = LocalDateTime.now();
@@ -83,4 +85,8 @@ public class Comment {
     public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
     public boolean isDeleted() { return deleted; }
     public void setDeleted(boolean deleted) { this.deleted = deleted; }
+    public boolean isReported() { return reported; }
+    public void setReported(boolean reported) { this.reported = reported; }
+    public String getReportReason() { return reportReason; }
+    public void setReportReason(String reportReason) { this.reportReason = reportReason; }
 }

@@ -201,4 +201,28 @@ public class CommentService {
         log.debug("Fetching all comments (admin)");
         return commentRepository.findAll();
     }
+
+    public void reportComment(Long commentId, String reason) {
+        if (reason == null || reason.isBlank())
+            throw new BadRequestException("Report reason is required.");
+        Comment comment = commentRepository.findById(commentId)
+            .orElseThrow(() -> new ResourceNotFoundException("Comment not found with id: " + commentId));
+        comment.setReported(true);
+        comment.setReportReason(reason);
+        comment.setUpdatedAt(LocalDateTime.now());
+        commentRepository.save(comment);
+    }
+
+    public List<Comment> getReportedComments() {
+        return commentRepository.findByReportedTrueOrderByCreatedAtDesc();
+    }
+
+    public void clearReport(Long commentId) {
+        Comment comment = commentRepository.findById(commentId)
+            .orElseThrow(() -> new ResourceNotFoundException("Comment not found with id: " + commentId));
+        comment.setReported(false);
+        comment.setReportReason(null);
+        comment.setUpdatedAt(LocalDateTime.now());
+        commentRepository.save(comment);
+    }
 }
