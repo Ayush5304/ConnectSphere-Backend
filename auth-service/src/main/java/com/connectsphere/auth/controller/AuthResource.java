@@ -71,6 +71,13 @@ public class AuthResource {
         return ResponseEntity.ok("Reset link sent to your email");
     }
 
+    /** POST /auth/mail-test - Sends a test email to verify SMTP setup. */
+    @PostMapping("/mail-test")
+    public ResponseEntity<String> mailTest(@RequestBody Map<String, String> body) {
+        authService.sendTestMail(body.get("email"));
+        return ResponseEntity.ok("Test email sent successfully");
+    }
+
     /**
      * POST /auth/reset-password — Reset Password with Token
      *
@@ -116,6 +123,37 @@ public class AuthResource {
     @PostMapping("/login")
     public ResponseEntity<Map<String, String>> login(@RequestBody Map<String, String> body) {
         return ResponseEntity.ok(authService.login(body.get("email"), body.get("password")));
+    }
+
+    /** POST /auth/otp/register/request — send signup OTP to email */
+    @PostMapping("/otp/register/request")
+    public ResponseEntity<String> requestRegisterOtp(@RequestBody Map<String, String> body) {
+        authService.startRegisterOtp(
+            body.get("username"),
+            body.get("email"),
+            body.get("password"),
+            body.get("fullName")
+        );
+        return ResponseEntity.ok("Signup OTP sent to your email.");
+    }
+
+    /** POST /auth/otp/register/verify — verify signup OTP and auto-login */
+    @PostMapping("/otp/register/verify")
+    public ResponseEntity<Map<String, String>> verifyRegisterOtp(@RequestBody Map<String, String> body) {
+        return ResponseEntity.ok(authService.verifyRegisterOtp(body.get("email"), body.get("otp")));
+    }
+
+    /** POST /auth/otp/login/request — send login OTP to email */
+    @PostMapping("/otp/login/request")
+    public ResponseEntity<String> requestLoginOtp(@RequestBody Map<String, String> body) {
+        authService.requestLoginOtp(body.get("email"));
+        return ResponseEntity.ok("Login OTP sent to your email.");
+    }
+
+    /** POST /auth/otp/login/verify — verify login OTP and issue JWT */
+    @PostMapping("/otp/login/verify")
+    public ResponseEntity<Map<String, String>> verifyLoginOtp(@RequestBody Map<String, String> body) {
+        return ResponseEntity.ok(authService.verifyLoginOtp(body.get("email"), body.get("otp")));
     }
 
     /**
@@ -254,6 +292,13 @@ public class AuthResource {
     @PutMapping("/user/{userId}/verify")
     public ResponseEntity<Void> verifyUser(@PathVariable Long userId) {
         authService.verifyUser(userId);
+        return ResponseEntity.ok().build();
+    }
+
+    /** PUT /auth/user/verify-by-email?email=... — Called by payment-service VERIFIED_BADGE flow */
+    @PutMapping("/user/verify-by-email")
+    public ResponseEntity<Void> verifyUserByEmail(@RequestParam String email) {
+        authService.verifyUserByEmail(email);
         return ResponseEntity.ok().build();
     }
 }

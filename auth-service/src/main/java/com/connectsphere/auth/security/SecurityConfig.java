@@ -122,6 +122,7 @@ public class SecurityConfig {
                 .requestMatchers(
                     "/auth/register", "/auth/login", "/auth/guest",
                     "/auth/forgot-password", "/auth/reset-password",
+                    "/auth/otp/**",
                     "/auth/user/**", "/auth/search", "/error"
                 ).permitAll()
                 .anyRequest().authenticated())

@@ -64,7 +64,7 @@ public class PostServiceImpl implements PostService {
     /**
      * MENTION_PATTERN — Regex pattern to find @mentions in post content
      * @(\\w+) matches @ followed by one or more word characters (letters, digits, underscore)
-     * e.g. "Hello @khushi how are you" → finds "khushi"
+     * e.g. "Hello @Ayush how are you" → finds "Ayush"
      * Pattern.compile() compiles the regex once for reuse (better performance)
      */
     private static final Pattern MENTION_PATTERN = Pattern.compile("@(\\w+)");
@@ -93,7 +93,11 @@ public class PostServiceImpl implements PostService {
         /* Validate required fields */
         if (userId == null) throw new BadRequestException("userId is required.");
         if (username == null || username.isBlank()) throw new BadRequestException("username is required.");
-        if (content == null || content.isBlank()) throw new BadRequestException("Post content cannot be empty.");
+        boolean hasContent = content != null && !content.isBlank();
+        boolean hasMedia = mediaUrl != null && !mediaUrl.isBlank();
+        if (!hasContent && !hasMedia) {
+            throw new BadRequestException("Post must contain text or media.");
+        }
 
         log.info("Creating post for user={} username={}", userId, username);
 
@@ -101,7 +105,7 @@ public class PostServiceImpl implements PostService {
         Post post = new Post();
         post.setUserId(userId);
         post.setUsername(username);
-        post.setContent(content);
+        post.setContent(content != null ? content : "");
         post.setMediaUrl(mediaUrl);
         post.setVisibility(visibility != null ? visibility : Post.Visibility.PUBLIC);
         Post saved = postRepository.save(post);
@@ -261,9 +265,9 @@ public class PostServiceImpl implements PostService {
 
     /** getPublicFeed() — Gets all PUBLIC non-deleted posts, newest first. Cached in Redis for 5 minutes. */
     @Override
-    @Cacheable(value = "publicFeed")
+    //@Cacheable(value = "publicFeed")
     public List<Post> getPublicFeed() {
-        return postRepository.findByVisibilityAndDeletedFalseOrderByCreatedAtDesc(Post.Visibility.PUBLIC);
+        return postRepository.findAllByOrderByCreatedAtDesc();
     }
 
     /**

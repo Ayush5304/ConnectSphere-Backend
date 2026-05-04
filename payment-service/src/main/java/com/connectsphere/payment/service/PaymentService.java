@@ -51,8 +51,17 @@ public class PaymentService {
     private static final int VERIFIED_BADGE_PRICE = 9900;  // ₹99
     private static final int BOOST_POST_PRICE     = 4900;  // ₹49
 
-    public CreateOrderResponse createOrder(String userEmail, CreateOrderRequest request) throws RazorpayException {
+    public CreateOrderResponse createOrder(String userEmail, CreateOrderRequest request) {
+        if ((userEmail == null || userEmail.isBlank()) && request != null) {
+            userEmail = request.getUserEmail();
+        }
         if (request.getType() == null) throw new BadRequestException("Payment type is required.");
+        if (userEmail == null || userEmail.isBlank()) throw new BadRequestException("Authenticated user email is required.");
+
+        if (razorpayKeyId == null || razorpayKeyId.isBlank()
+                || razorpayKeySecret == null || razorpayKeySecret.isBlank()) {
+            throw new BadRequestException("Payment gateway is not configured. Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET.");
+        }
 
         if (request.getType() == Payment.PaymentType.VERIFIED_BADGE &&
             paymentRepository.existsByUserEmailAndTypeAndStatus(
@@ -75,8 +84,14 @@ public class PaymentService {
         orderRequest.put("receipt", "rcpt_" + System.currentTimeMillis());
         orderRequest.put("payment_capture", 1);
 
-        Order razorpayOrder = razorpayClient.Orders.create(orderRequest);
-        String razorpayOrderId = razorpayOrder.get("id");
+        final String razorpayOrderId;
+        try {
+            Order razorpayOrder = razorpayClient.Orders.create(orderRequest);
+            razorpayOrderId = razorpayOrder.get("id");
+        } catch (RazorpayException e) {
+            log.error("Razorpay create order failed for email={} type={}: {}", userEmail, request.getType(), e.getMessage());
+            throw new BadRequestException("Unable to create Razorpay order. Check Razorpay keys and account mode (test/live).");
+        }
 
         log.info("Razorpay order created: orderId={}", razorpayOrderId);
 
@@ -168,6 +183,9 @@ public class PaymentService {
     }
 
     public List<Payment> getPaymentHistory(String userEmail) {
+        if (userEmail == null || userEmail.isBlank()) {
+            throw new BadRequestException("Email is required to fetch payment history.");
+        }
         return paymentRepository.findByUserEmailOrderByCreatedAtDesc(userEmail);
     }
 

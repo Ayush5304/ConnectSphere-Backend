@@ -10,46 +10,79 @@ spring:
       routes:
 
         - id: auth-service
-          uri: lb://AUTH-SERVICE
+          uri: http://localhost:8081
           predicates:
             - Path=/api/auth/**
+          filters:
+            - StripPrefix=1   # ✅ FIX
+
+        - id: auth-service-oauth2
+          uri: http://localhost:8081
+          predicates:
+            - Path=/oauth2/**,/login/oauth2/**
 
         - id: post-service
-          uri: lb://POST-SERVICE
+          uri: http://localhost:8082
           predicates:
             - Path=/api/posts/**
+          filters:
+            - StripPrefix=1
 
         - id: comment-service
-          uri: lb://COMMENT-SERVICE
+          uri: http://localhost:8083
           predicates:
             - Path=/api/comments/**
+          filters:
+            - StripPrefix=1
 
         - id: like-service
-          uri: lb://LIKE-SERVICE
+          uri: http://localhost:8084
           predicates:
             - Path=/api/likes/**
+          filters:
+            - StripPrefix=1
 
         - id: follow-service
-          uri: lb://FOLLOW-SERVICE
+          uri: http://localhost:8085
           predicates:
-            - Path=/api/follow/**
+            - Path=/api/follows/**
+          filters:
+            - StripPrefix=1
 
         - id: notification-service
-          uri: lb://NOTIFICATION-SERVICE
+          uri: http://localhost:8086
           predicates:
             - Path=/api/notifications/**
+          filters:
+            - StripPrefix=1
 
         - id: media-service
-          uri: lb://MEDIA-SERVICE
+          uri: http://localhost:8087
           predicates:
-            - Path=/api/media/**
+            - Path=/api/media/**,/api/stories/**
+          filters:
+            - StripPrefix=1
+
+        - id: media-service-legacy-files
+          uri: http://localhost:8087
+          predicates:
+            - Path=/media/files/**
 
         - id: search-service
-          uri: lb://SEARCH-SERVICE
+          uri: http://localhost:8088
           predicates:
-            - Path=/api/search/**
+            - Path=/api/search/**,/api/hashtags/**
+          filters:
+            - StripPrefix=1
 
-# ✅ JWT FIX
+        - id: payment-service
+          uri: http://localhost:8089
+          predicates:
+            - Path=/api/payments/**
+          filters:
+            - StripPrefix=1
+
+# JWT
 jwt:
   secret: ${JWT_SECRET}
 

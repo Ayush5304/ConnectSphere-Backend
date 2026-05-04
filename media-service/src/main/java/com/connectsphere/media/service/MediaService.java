@@ -166,7 +166,7 @@ public class MediaService {
         }
 
         Files.write(dest, file.getBytes()); /* Write file to disk */
-        return "http://localhost:8080/media/files/" + filename;
+        return "http://localhost:8080/api/media/files/" + filename;
     }
 
     /**

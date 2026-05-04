@@ -1,8 +1,11 @@
 package com.connectsphere.payment.entity;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonValue;
 import jakarta.persistence.*;
 import lombok.Data;
 import java.time.LocalDateTime;
+import java.util.Locale;
 
 @Entity
 @Table(name = "payments")
@@ -54,7 +57,26 @@ public class Payment {
     }
 
     public enum PaymentType {
-        VERIFIED_BADGE, BOOST_POST
+        VERIFIED_BADGE, BOOST_POST;
+
+        @JsonCreator
+        public static PaymentType from(String raw) {
+            if (raw == null) return null;
+            String normalized = raw.trim()
+                    .toUpperCase(Locale.ROOT)
+                    .replace('-', '_')
+                    .replace(' ', '_');
+            return switch (normalized) {
+                case "VERIFIED_BADGE", "VERIFIEDBADGE", "VERIFIED" -> VERIFIED_BADGE;
+                case "BOOST_POST", "BOOSTPOST", "BOOST" -> BOOST_POST;
+                default -> throw new IllegalArgumentException("Invalid payment type: " + raw);
+            };
+        }
+
+        @JsonValue
+        public String toJson() {
+            return name();
+        }
     }
 
     public enum PaymentStatus {

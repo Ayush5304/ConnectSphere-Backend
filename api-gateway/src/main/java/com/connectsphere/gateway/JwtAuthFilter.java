@@ -30,6 +30,11 @@ public class JwtAuthFilter extends AbstractGatewayFilterFactory<JwtAuthFilter.Co
     private static final List<String> PUBLIC_PATHS = List.of(
             "/api/auth/register",
             "/api/auth/login",
+            "/api/auth/otp/",
+            "/api/auth/otp/login/request",
+            "/api/auth/otp/login/verify",
+            "/api/auth/otp/register/request",
+            "/api/auth/otp/register/verify",
             "/api/auth/guest",
             "/api/auth/forgot-password",
             "/api/auth/reset-password",

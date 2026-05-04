@@ -124,6 +124,15 @@ public class User {
     /** verified — Whether user has paid for verified badge (blue tick) */
     private boolean verified = false;
 
+    /** loginOtp — last generated one-time password for OTP auth flow */
+    private String loginOtp;
+
+    /** loginOtpExpiry — OTP expiry timestamp (short lived) */
+    private java.time.LocalDateTime loginOtpExpiry;
+
+    /** pendingRegistration — true when signup is initiated but OTP not verified yet */
+    private boolean pendingRegistration = false;
+
     /**
      * Role enum — defines the 3 possible user roles
      * Stored as a string in the database column
@@ -167,4 +176,10 @@ public class User {
     public void setReportReason(String reportReason) { this.reportReason = reportReason; }
     public boolean isVerified() { return verified; }
     public void setVerified(boolean verified) { this.verified = verified; }
+    public String getLoginOtp() { return loginOtp; }
+    public void setLoginOtp(String loginOtp) { this.loginOtp = loginOtp; }
+    public java.time.LocalDateTime getLoginOtpExpiry() { return loginOtpExpiry; }
+    public void setLoginOtpExpiry(java.time.LocalDateTime loginOtpExpiry) { this.loginOtpExpiry = loginOtpExpiry; }
+    public boolean isPendingRegistration() { return pendingRegistration; }
+    public void setPendingRegistration(boolean pendingRegistration) { this.pendingRegistration = pendingRegistration; }
 }

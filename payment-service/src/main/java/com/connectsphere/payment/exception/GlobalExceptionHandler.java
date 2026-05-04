@@ -2,8 +2,11 @@ package com.connectsphere.payment.exception;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -26,6 +29,17 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Map<String, Object>> handleNotFound(ResourceNotFoundException ex) {
         log.warn("Not found in payment-service: {}", ex.getMessage());
         return buildError(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    @ExceptionHandler({
+            HttpMessageNotReadableException.class,
+            IllegalArgumentException.class,
+            MissingRequestHeaderException.class,
+            DataIntegrityViolationException.class
+    })
+    public ResponseEntity<Map<String, Object>> handleClientInputErrors(Exception ex) {
+        log.warn("Client input/config error in payment-service: {}", ex.getMessage());
+        return buildError(HttpStatus.BAD_REQUEST, "Invalid payment request or configuration.");
     }
 
     @ExceptionHandler(Exception.class)

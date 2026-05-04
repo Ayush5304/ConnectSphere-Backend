@@ -8,13 +8,16 @@ import com.connectsphere.auth.security.JwtUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.mail.MailException;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.UUID;
 
 /**
@@ -43,6 +46,9 @@ public class AuthService {
 
     @Value("${spring.mail.username}")
     private String fromEmail;
+
+    @Value("${spring.mail.password:}")
+    private String mailPassword;
 
     public AuthService(UserRepository userRepository, PasswordEncoder passwordEncoder,
                        JwtUtil jwtUtil, JavaMailSender mailSender) {
@@ -102,6 +108,7 @@ public class AuthService {
 
         /* Send welcome email — failure does not break registration */
         try {
+            ensureMailConfigured();
             SimpleMailMessage mail = new SimpleMailMessage();
             mail.setFrom(fromEmail);
             mail.setTo(email);
@@ -116,6 +123,93 @@ public class AuthService {
         }
 
         return saved;
+    }
+
+    /** startRegisterOtp() — create or update a pending user and email OTP. */
+    public void startRegisterOtp(String username, String email, String password, String fullName) {
+        if (username == null || username.isBlank())
+            throw new BadRequestException("Username is required.");
+        if (email == null || email.isBlank())
+            throw new BadRequestException("Email is required.");
+        if (password == null || password.length() < 6)
+            throw new BadRequestException("Password must be at least 6 characters.");
+
+        User user = userRepository.findByEmail(email).orElse(null);
+        if (user != null && !user.isPendingRegistration())
+            throw new BadRequestException("Email is already in use.");
+
+        if (user == null) {
+            if (userRepository.existsByUsername(username))
+                throw new BadRequestException("Username is already taken.");
+            user = new User();
+            user.setEmail(email);
+            user.setUsername(username);
+        } else if (!user.getUsername().equalsIgnoreCase(username) && userRepository.existsByUsername(username)) {
+            throw new BadRequestException("Username is already taken.");
+        }
+
+        user.setUsername(username);
+        user.setFullName(fullName);
+        user.setPasswordHash(passwordEncoder.encode(password));
+        user.setRole(User.Role.USER);
+        user.setActive(true);
+        user.setPendingRegistration(true);
+        String otp = generateOtp();
+        user.setLoginOtp(otp);
+        user.setLoginOtpExpiry(LocalDateTime.now().plusMinutes(10));
+        userRepository.save(user);
+        sendOtpEmail(email, otp, "ConnectSphere Signup OTP");
+    }
+
+    /** verifyRegisterOtp() — verifies signup OTP, activates account and returns login payload. */
+    public Map<String, String> verifyRegisterOtp(String email, String otp) {
+        User user = verifyOtpInternal(email, otp);
+        if (!user.isPendingRegistration()) {
+            throw new BadRequestException("This account is already registered. Please log in.");
+        }
+        user.setPendingRegistration(false);
+        user.setLoginOtp(null);
+        user.setLoginOtpExpiry(null);
+        user.setLastLoginAt(LocalDateTime.now());
+        userRepository.save(user);
+        String token = jwtUtil.generateToken(user.getEmail(), user.getRole().name());
+        return buildLoginResponse(user, token);
+    }
+
+    /** requestLoginOtp() — generates OTP for existing active account and emails it. */
+    public void requestLoginOtp(String email) {
+        if (email == null || email.isBlank())
+            throw new BadRequestException("Email is required.");
+        User user = userRepository.findByEmail(email)
+            .orElseThrow(() -> new BadRequestException("No account found with this email."));
+        if (user.isPendingRegistration()) {
+            throw new BadRequestException("Signup is pending. Please verify your signup OTP first.");
+        }
+        if (!user.isActive()) {
+            throw new BadRequestException("Account is suspended. Please contact support.");
+        }
+        String otp = generateOtp();
+        user.setLoginOtp(otp);
+        user.setLoginOtpExpiry(LocalDateTime.now().plusMinutes(10));
+        userRepository.save(user);
+        sendOtpEmail(email, otp, "ConnectSphere Login OTP");
+    }
+
+    /** verifyLoginOtp() — verifies OTP and returns normal login response with JWT. */
+    public Map<String, String> verifyLoginOtp(String email, String otp) {
+        User user = verifyOtpInternal(email, otp);
+        if (user.isPendingRegistration()) {
+            throw new BadRequestException("Signup is pending. Please verify using signup OTP flow.");
+        }
+        if (!user.isActive()) {
+            throw new BadRequestException("Account is suspended. Please contact support.");
+        }
+        user.setLoginOtp(null);
+        user.setLoginOtpExpiry(null);
+        user.setLastLoginAt(LocalDateTime.now());
+        userRepository.save(user);
+        String token = jwtUtil.generateToken(user.getEmail(), user.getRole().name());
+        return buildLoginResponse(user, token);
     }
 
     /**
@@ -152,7 +246,7 @@ public class AuthService {
 
     /** buildLoginResponse() — Builds the login response map with all user fields. */
     private Map<String, String> buildLoginResponse(User user, String token) {
-        java.util.HashMap<String, String> map = new java.util.HashMap<>();
+        HashMap<String, String> map = new HashMap<>();
         map.put("token", token);
         map.put("userId", user.getUserId().toString());
         map.put("username", user.getUsername());
@@ -223,6 +317,7 @@ public class AuthService {
         userRepository.save(user);
 
         SimpleMailMessage mail = new SimpleMailMessage();
+        ensureMailConfigured();
         mail.setFrom(fromEmail);
         mail.setTo(email);
         mail.setSubject("ConnectSphere - Reset Your Password");
@@ -230,8 +325,39 @@ public class AuthService {
                 + "Click the link below to reset your password (valid for 1 hour):\n\n"
                 + frontendUrl + "/reset-password?token=" + token + "\n\n"
                 + "If you did not request this, ignore this email.\n\nConnectSphere Team");
-        mailSender.send(mail);
-        log.info("Password reset email sent to {}", email);
+        try {
+            mailSender.send(mail);
+            log.info("Password reset email sent to {}", email);
+        } catch (MailException e) {
+            log.error("Password reset email failed for {}: {}", email, e.getMessage());
+            throw new BadRequestException("Unable to send reset email right now. Please try again in a few minutes.");
+        }
+    }
+
+    /** sendTestMail() - Sends a simple test email to verify SMTP config quickly. */
+    public void sendTestMail(String toEmail) {
+        if (toEmail == null || toEmail.isBlank()) {
+            throw new BadRequestException("Recipient email is required.");
+        }
+        ensureMailConfigured();
+        SimpleMailMessage mail = new SimpleMailMessage();
+        mail.setFrom(fromEmail);
+        mail.setTo(toEmail);
+        mail.setSubject("ConnectSphere SMTP Test");
+        mail.setText("This is a test email from ConnectSphere. If you received this, SMTP is configured correctly.");
+        try {
+            mailSender.send(mail);
+            log.info("SMTP test mail sent to {}", toEmail);
+        } catch (MailException e) {
+            log.error("SMTP test mail failed for {}: {}", toEmail, e.getMessage());
+            throw new BadRequestException("SMTP test failed. Check SMTP_EMAIL / SMTP_APP_PASSWORD and Gmail App Password settings.");
+        }
+    }
+
+    private void ensureMailConfigured() {
+        if (fromEmail == null || fromEmail.isBlank() || mailPassword == null || mailPassword.isBlank()) {
+            throw new BadRequestException("Mail service is not configured. Set SMTP_EMAIL and SMTP_APP_PASSWORD.");
+        }
     }
 
     /**
@@ -322,5 +448,55 @@ public class AuthService {
         user.setVerified(true);
         userRepository.save(user);
         log.info("User userId={} verified", userId);
+    }
+
+    /** verifyUserByEmail() — Sets verified=true by email (used by payment-service fallback path). */
+    public void verifyUserByEmail(String email) {
+        if (email == null || email.isBlank())
+            throw new BadRequestException("Email is required.");
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found for email: " + email));
+        user.setVerified(true);
+        userRepository.save(user);
+        log.info("User email={} verified", email);
+    }
+
+    private User verifyOtpInternal(String email, String otp) {
+        if (email == null || email.isBlank())
+            throw new BadRequestException("Email is required.");
+        if (otp == null || otp.isBlank())
+            throw new BadRequestException("OTP is required.");
+        User user = userRepository.findByEmail(email)
+            .orElseThrow(() -> new BadRequestException("No account found with this email."));
+        if (user.getLoginOtp() == null || user.getLoginOtpExpiry() == null) {
+            throw new BadRequestException("No OTP request found. Please request OTP first.");
+        }
+        if (user.getLoginOtpExpiry().isBefore(LocalDateTime.now())) {
+            throw new BadRequestException("OTP expired. Please request a new OTP.");
+        }
+        if (!user.getLoginOtp().equals(otp.trim())) {
+            throw new BadRequestException("Invalid OTP.");
+        }
+        return user;
+    }
+
+    private String generateOtp() {
+        return String.valueOf(100000 + new Random().nextInt(900000));
+    }
+
+    private void sendOtpEmail(String email, String otp, String subject) {
+        ensureMailConfigured();
+        SimpleMailMessage mail = new SimpleMailMessage();
+        mail.setFrom(fromEmail);
+        mail.setTo(email);
+        mail.setSubject(subject);
+        mail.setText("Your ConnectSphere OTP is: " + otp + "\n\nThis OTP is valid for 10 minutes.");
+        try {
+            mailSender.send(mail);
+            log.info("OTP email sent to {}", email);
+        } catch (MailException e) {
+            log.error("OTP mail failed for {}: {}", email, e.getMessage());
+            throw new BadRequestException("Unable to send OTP right now. Please try again in a few minutes.");
+        }
     }
 }

@@ -5,7 +5,6 @@ import com.connectsphere.payment.dto.CreateOrderResponse;
 import com.connectsphere.payment.dto.VerifyPaymentRequest;
 import com.connectsphere.payment.entity.Payment;
 import com.connectsphere.payment.service.PaymentService;
-import com.razorpay.RazorpayException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -23,8 +22,8 @@ public class PaymentController {
     /** POST /payments/create-order — X-User-Email injected by API Gateway */
     @PostMapping("/create-order")
     public ResponseEntity<CreateOrderResponse> createOrder(
-            @RequestHeader("X-User-Email") String userEmail,
-            @RequestBody CreateOrderRequest request) throws RazorpayException {
+            @RequestHeader(value = "X-User-Email", required = false) String userEmail,
+            @RequestBody CreateOrderRequest request) {
         return ResponseEntity.ok(paymentService.createOrder(userEmail, request));
     }
 
@@ -38,8 +37,10 @@ public class PaymentController {
     /** GET /payments/history — payment history for the authenticated user */
     @GetMapping("/history")
     public ResponseEntity<List<Payment>> getHistory(
-            @RequestHeader("X-User-Email") String userEmail) {
-        return ResponseEntity.ok(paymentService.getPaymentHistory(userEmail));
+            @RequestHeader(value = "X-User-Email", required = false) String userEmail,
+            @RequestParam(value = "email", required = false) String email) {
+        String resolvedEmail = (userEmail != null && !userEmail.isBlank()) ? userEmail : email;
+        return ResponseEntity.ok(paymentService.getPaymentHistory(resolvedEmail));
     }
 
     /** GET /payments/admin/all — admin: all payments */
