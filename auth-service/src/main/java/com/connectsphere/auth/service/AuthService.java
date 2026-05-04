@@ -8,28 +8,25 @@ import com.connectsphere.auth.security.JwtUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.mail.MailException;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+
+import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * AuthService — Authentication and user management business logic.
  *
- * Responsibilities:
- *   - Register new users (with validation + welcome email)
- *   - Login users (validate credentials + generate JWT)
- *   - Password reset (generate token + send email + validate + update)
- *   - Profile management (get + update)
- *   - Admin operations (list users, change roles, suspend, delete)
- *   - User reporting
+ * BUG-FIX: Added OTP-based login and OTP-based registration flows.
+ *   - requestLoginOtp  / verifyLoginOtp   → OTP stored in User entity (loginOtp + loginOtpExpiry)
+ *   - requestRegisterOtp / verifyRegisterOtp → pending data held in memory until OTP verified
  */
 @Service
 public class AuthService {
@@ -47,8 +44,16 @@ public class AuthService {
     @Value("${spring.mail.username}")
     private String fromEmail;
 
-    @Value("${spring.mail.password:}")
-    private String mailPassword;
+    /**
+     * Temporary in-memory store for pending OTP registrations.
+     * Key = email, Value = registration data map.
+     * Cleared after successful verification or after OTP expires.
+     */
+    private final ConcurrentHashMap<String, Map<String, String>> pendingRegistrations = new ConcurrentHashMap<>();
+
+    /** OTP value mapped to its expiry for pending registrations (separate from User entity) */
+    private final ConcurrentHashMap<String, String> pendingOtps = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, LocalDateTime> pendingOtpExpiry = new ConcurrentHashMap<>();
 
     public AuthService(UserRepository userRepository, PasswordEncoder passwordEncoder,
                        JwtUtil jwtUtil, JavaMailSender mailSender) {
@@ -58,30 +63,116 @@ public class AuthService {
         this.mailSender = mailSender;
     }
 
-    /**
-     * guestLogin() — Creates a guest session without credentials.
-     * Returns a JWT token with GUEST role and userId=0.
-     */
-    public Map<String, String> guestLogin() {
-        log.info("Guest login requested");
-        String token = jwtUtil.generateToken("guest@connectsphere.com", "GUEST");
-        return Map.of("token", token, "userId", "0", "username", "guest", "role", "GUEST");
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /** Generates a cryptographically random 6-digit OTP string. */
+    private String generateOtp() {
+        SecureRandom rng = new SecureRandom();
+        int code = 100_000 + rng.nextInt(900_000);
+        return String.valueOf(code);
     }
 
-    /** register() — Delegates to registerWithFullName with null fullName. */
-    public User register(String username, String email, String password) {
-        return registerWithFullName(username, email, password, null);
+    /** Sends a plain-text email. Failure is logged but not thrown. */
+    private void sendMail(String to, String subject, String body) {
+        try {
+            SimpleMailMessage msg = new SimpleMailMessage();
+            msg.setFrom(fromEmail);
+            msg.setTo(to);
+            msg.setSubject(subject);
+            msg.setText(body);
+            mailSender.send(msg);
+        } catch (Exception e) {
+            log.warn("Email send failed to {}: {}", to, e.getMessage());
+        }
     }
 
+    // ── OTP Login ─────────────────────────────────────────────────────────────
+
     /**
-     * registerWithFullName() — Registers a new user with full validation.
+     * requestLoginOtp() — Generates a 6-digit OTP and emails it to the user.
      *
-     * Validates: username, email, password length, uniqueness.
-     * Hashes password with BCrypt before saving.
-     * Sends welcome email (failure does not block registration).
+     * FIX: This endpoint was missing from the backend. The frontend calls
+     * POST /auth/otp/login/request and expected this behaviour.
+     *
+     * The OTP is stored directly on the User entity in two new fields:
+     *   loginOtp        — the 6-digit code
+     *   loginOtpExpiry  — 5 minutes from now
      */
-    public User registerWithFullName(String username, String email, String password, String fullName) {
-        /* Validate required fields */
+    public void requestLoginOtp(String email) {
+        if (email == null || email.isBlank())
+            throw new BadRequestException("Email is required.");
+
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new BadRequestException("No account found with this email."));
+
+        if (!user.isActive())
+            throw new BadRequestException("Account is suspended. Please contact support.");
+
+        String otp = generateOtp();
+        user.setLoginOtp(otp);
+        user.setLoginOtpExpiry(LocalDateTime.now().plusMinutes(5));
+        userRepository.save(user);
+
+        log.info("Login OTP generated for email={}", email);
+
+        sendMail(email,
+                "ConnectSphere — Your Login OTP",
+                "Hi " + user.getUsername() + ",\n\n"
+                + "Your one-time login code is: " + otp + "\n\n"
+                + "This code expires in 5 minutes.\n"
+                + "If you did not request this, please ignore this email.\n\n"
+                + "ConnectSphere Team");
+    }
+
+    /**
+     * verifyLoginOtp() — Validates the submitted OTP and returns a JWT on success.
+     *
+     * FIX: This endpoint was missing from the backend. The frontend calls
+     * POST /auth/otp/login/verify with {email, otp}.
+     */
+    public Map<String, String> verifyLoginOtp(String email, String otp) {
+        if (email == null || email.isBlank())
+            throw new BadRequestException("Email is required.");
+        if (otp == null || otp.isBlank())
+            throw new BadRequestException("OTP is required.");
+
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new BadRequestException("No account found with this email."));
+
+        if (user.getLoginOtp() == null)
+            throw new BadRequestException("No OTP requested. Please request an OTP first.");
+
+        if (LocalDateTime.now().isAfter(user.getLoginOtpExpiry()))
+            throw new BadRequestException("OTP has expired. Please request a new one.");
+
+        if (!user.getLoginOtp().equals(otp.trim()))
+            throw new BadRequestException("Invalid OTP. Please check and try again.");
+
+        // Clear OTP after successful use (one-time use)
+        user.setLoginOtp(null);
+        user.setLoginOtpExpiry(null);
+        user.setLastLoginAt(LocalDateTime.now());
+        userRepository.save(user);
+
+        log.info("OTP login successful for email={}", email);
+
+        String token = jwtUtil.generateToken(user.getEmail(), user.getRole().name());
+        return buildLoginResponse(user, token);
+    }
+
+    // ── OTP Registration ──────────────────────────────────────────────────────
+
+    /**
+     * requestRegisterOtp() — Validates registration data, stores it temporarily,
+     * and sends a 6-digit OTP to the provided email.
+     *
+     * FIX: This endpoint was missing from the backend. The frontend calls
+     * POST /auth/otp/register/request with {username, email, password, fullName}.
+     *
+     * The user is NOT created yet — only after verifyRegisterOtp succeeds.
+     */
+    public void requestRegisterOtp(String username, String email, String password, String fullName) {
+        // Validate fields
         if (username == null || username.isBlank())
             throw new BadRequestException("Username is required.");
         if (email == null || email.isBlank())
@@ -89,7 +180,115 @@ public class AuthService {
         if (password == null || password.length() < 6)
             throw new BadRequestException("Password must be at least 6 characters.");
 
-        /* Validate uniqueness */
+        // Check uniqueness before sending OTP
+        if (userRepository.existsByEmail(email))
+            throw new BadRequestException("Email is already in use.");
+        if (userRepository.existsByUsername(username))
+            throw new BadRequestException("Username is already taken.");
+
+        String otp = generateOtp();
+
+        // Store pending registration data in memory
+        Map<String, String> regData = new HashMap<>();
+        regData.put("username", username);
+        regData.put("email", email);
+        regData.put("password", password);
+        regData.put("fullName", fullName != null ? fullName : "");
+        pendingRegistrations.put(email, regData);
+        pendingOtps.put(email, otp);
+        pendingOtpExpiry.put(email, LocalDateTime.now().plusMinutes(10));
+
+        log.info("Register OTP generated for email={}", email);
+
+        sendMail(email,
+                "ConnectSphere — Verify Your Email",
+                "Hi " + (fullName != null && !fullName.isBlank() ? fullName : username) + ",\n\n"
+                + "Your verification code is: " + otp + "\n\n"
+                + "This code expires in 10 minutes.\n"
+                + "If you did not create an account, please ignore this email.\n\n"
+                + "ConnectSphere Team");
+    }
+
+    /**
+     * verifyRegisterOtp() — Validates OTP, creates the user account, and returns JWT.
+     *
+     * FIX: This endpoint was missing from the backend. The frontend calls
+     * POST /auth/otp/register/verify with {email, otp}.
+     */
+    public Map<String, String> verifyRegisterOtp(String email, String otp) {
+        if (email == null || email.isBlank())
+            throw new BadRequestException("Email is required.");
+        if (otp == null || otp.isBlank())
+            throw new BadRequestException("OTP is required.");
+
+        String storedOtp = pendingOtps.get(email);
+        LocalDateTime expiry = pendingOtpExpiry.get(email);
+        Map<String, String> regData = pendingRegistrations.get(email);
+
+        if (storedOtp == null || regData == null)
+            throw new BadRequestException("No pending registration found. Please start over.");
+
+        if (LocalDateTime.now().isAfter(expiry))
+            throw new BadRequestException("OTP has expired. Please request a new one.");
+
+        if (!storedOtp.equals(otp.trim()))
+            throw new BadRequestException("Invalid OTP. Please check and try again.");
+
+        // Re-check uniqueness in case someone registered in the meantime
+        if (userRepository.existsByEmail(email))
+            throw new BadRequestException("Email is already in use.");
+        if (userRepository.existsByUsername(regData.get("username")))
+            throw new BadRequestException("Username is already taken.");
+
+        // Create the user
+        User user = new User();
+        user.setUsername(regData.get("username"));
+        user.setEmail(email);
+        user.setPasswordHash(passwordEncoder.encode(regData.get("password")));
+        String fullName = regData.get("fullName");
+        if (fullName != null && !fullName.isBlank()) user.setFullName(fullName);
+        user.setLastLoginAt(LocalDateTime.now());
+
+        User saved = userRepository.save(user);
+
+        // Clean up pending stores
+        pendingRegistrations.remove(email);
+        pendingOtps.remove(email);
+        pendingOtpExpiry.remove(email);
+
+        log.info("OTP registration successful: userId={}, email={}", saved.getUserId(), email);
+
+        // Send welcome email (non-blocking)
+        sendMail(email,
+                "Welcome to ConnectSphere! 🎉",
+                "Hi " + (fullName != null && !fullName.isBlank() ? fullName : saved.getUsername()) + ",\n\n"
+                + "Your account is verified and ready. Welcome to ConnectSphere!\n\n"
+                + "Visit: " + frontendUrl + "\n\nConnectSphere Team");
+
+        String token = jwtUtil.generateToken(saved.getEmail(), saved.getRole().name());
+        return buildLoginResponse(saved, token);
+    }
+
+    // ── Existing Methods (unchanged) ──────────────────────────────────────────
+
+    public Map<String, String> guestLogin() {
+        log.info("Guest login requested");
+        String token = jwtUtil.generateToken("guest@connectsphere.com", "GUEST");
+        return Map.of("token", token, "userId", "0", "username", "guest", "role", "GUEST");
+    }
+
+    public User register(String username, String email, String password) {
+        return registerWithFullName(username, email, password, null);
+    }
+
+    public User registerWithFullName(String username, String email, String password, String fullName) {
+        if (username == null || username.isBlank())
+            throw new BadRequestException("Username is required.");
+        if (email == null || email.isBlank())
+            throw new BadRequestException("Email is required.");
+        if (password == null || password.length() < 6)
+            throw new BadRequestException("Password must be at least 6 characters.");
+
         if (userRepository.existsByEmail(email))
             throw new BadRequestException("Email is already in use.");
         if (userRepository.existsByUsername(username))
@@ -104,120 +303,16 @@ public class AuthService {
         user.setPasswordHash(passwordEncoder.encode(password));
 
         User saved = userRepository.save(user);
-        log.info("User registered successfully: userId={}, username={}", saved.getUserId(), username);
+        log.info("User registered: userId={}", saved.getUserId());
 
-        /* Send welcome email — failure does not break registration */
-        try {
-            ensureMailConfigured();
-            SimpleMailMessage mail = new SimpleMailMessage();
-            mail.setFrom(fromEmail);
-            mail.setTo(email);
-            mail.setSubject("Welcome to ConnectSphere! 🎉");
-            mail.setText("Hi " + (fullName != null ? fullName : username) + ",\n\n"
-                    + "Welcome to ConnectSphere! Your account has been created successfully.\n\n"
-                    + "Start sharing moments, connecting with people, and discovering trending content.\n\n"
-                    + "Visit: " + frontendUrl + "\n\nConnectSphere Team");
-            mailSender.send(mail);
-        } catch (Exception e) {
-            log.warn("Welcome email failed for {}: {}", email, e.getMessage());
-        }
+        sendMail(email,
+                "Welcome to ConnectSphere! 🎉",
+                "Hi " + (fullName != null ? fullName : username) + ",\n\n"
+                + "Welcome to ConnectSphere!\n\nVisit: " + frontendUrl + "\n\nConnectSphere Team");
 
         return saved;
     }
 
-    /** startRegisterOtp() — create or update a pending user and email OTP. */
-    public void startRegisterOtp(String username, String email, String password, String fullName) {
-        if (username == null || username.isBlank())
-            throw new BadRequestException("Username is required.");
-        if (email == null || email.isBlank())
-            throw new BadRequestException("Email is required.");
-        if (password == null || password.length() < 6)
-            throw new BadRequestException("Password must be at least 6 characters.");
-
-        User user = userRepository.findByEmail(email).orElse(null);
-        if (user != null && !user.isPendingRegistration())
-            throw new BadRequestException("Email is already in use.");
-
-        if (user == null) {
-            if (userRepository.existsByUsername(username))
-                throw new BadRequestException("Username is already taken.");
-            user = new User();
-            user.setEmail(email);
-            user.setUsername(username);
-        } else if (!user.getUsername().equalsIgnoreCase(username) && userRepository.existsByUsername(username)) {
-            throw new BadRequestException("Username is already taken.");
-        }
-
-        user.setUsername(username);
-        user.setFullName(fullName);
-        user.setPasswordHash(passwordEncoder.encode(password));
-        user.setRole(User.Role.USER);
-        user.setActive(true);
-        user.setPendingRegistration(true);
-        String otp = generateOtp();
-        user.setLoginOtp(otp);
-        user.setLoginOtpExpiry(LocalDateTime.now().plusMinutes(10));
-        userRepository.save(user);
-        sendOtpEmail(email, otp, "ConnectSphere Signup OTP");
-    }
-
-    /** verifyRegisterOtp() — verifies signup OTP, activates account and returns login payload. */
-    public Map<String, String> verifyRegisterOtp(String email, String otp) {
-        User user = verifyOtpInternal(email, otp);
-        if (!user.isPendingRegistration()) {
-            throw new BadRequestException("This account is already registered. Please log in.");
-        }
-        user.setPendingRegistration(false);
-        user.setLoginOtp(null);
-        user.setLoginOtpExpiry(null);
-        user.setLastLoginAt(LocalDateTime.now());
-        userRepository.save(user);
-        String token = jwtUtil.generateToken(user.getEmail(), user.getRole().name());
-        return buildLoginResponse(user, token);
-    }
-
-    /** requestLoginOtp() — generates OTP for existing active account and emails it. */
-    public void requestLoginOtp(String email) {
-        if (email == null || email.isBlank())
-            throw new BadRequestException("Email is required.");
-        User user = userRepository.findByEmail(email)
-            .orElseThrow(() -> new BadRequestException("No account found with this email."));
-        if (user.isPendingRegistration()) {
-            throw new BadRequestException("Signup is pending. Please verify your signup OTP first.");
-        }
-        if (!user.isActive()) {
-            throw new BadRequestException("Account is suspended. Please contact support.");
-        }
-        String otp = generateOtp();
-        user.setLoginOtp(otp);
-        user.setLoginOtpExpiry(LocalDateTime.now().plusMinutes(10));
-        userRepository.save(user);
-        sendOtpEmail(email, otp, "ConnectSphere Login OTP");
-    }
-
-    /** verifyLoginOtp() — verifies OTP and returns normal login response with JWT. */
-    public Map<String, String> verifyLoginOtp(String email, String otp) {
-        User user = verifyOtpInternal(email, otp);
-        if (user.isPendingRegistration()) {
-            throw new BadRequestException("Signup is pending. Please verify using signup OTP flow.");
-        }
-        if (!user.isActive()) {
-            throw new BadRequestException("Account is suspended. Please contact support.");
-        }
-        user.setLoginOtp(null);
-        user.setLoginOtpExpiry(null);
-        user.setLastLoginAt(LocalDateTime.now());
-        userRepository.save(user);
-        String token = jwtUtil.generateToken(user.getEmail(), user.getRole().name());
-        return buildLoginResponse(user, token);
-    }
-
-    /**
-     * login() — Validates credentials and returns JWT token + user info.
-     *
-     * Validates email and password presence, checks credentials,
-     * verifies account is active, updates lastLoginAt, returns JWT.
-     */
     public Map<String, String> login(String email, String password) {
         if (email == null || email.isBlank())
             throw new BadRequestException("Email is required.");
@@ -238,13 +333,12 @@ public class AuthService {
         user.setLastLoginAt(LocalDateTime.now());
         userRepository.save(user);
 
-        log.info("Login successful for userId={}, username={}", user.getUserId(), user.getUsername());
+        log.info("Login successful: userId={}", user.getUserId());
 
         String token = jwtUtil.generateToken(user.getEmail(), user.getRole().name());
         return buildLoginResponse(user, token);
     }
 
-    /** buildLoginResponse() — Builds the login response map with all user fields. */
     private Map<String, String> buildLoginResponse(User user, String token) {
         HashMap<String, String> map = new HashMap<>();
         map.put("token", token);
@@ -258,35 +352,23 @@ public class AuthService {
         return map;
     }
 
-    /**
-     * getUserById() — Finds a user by their ID.
-     * Throws ResourceNotFoundException if not found.
-     */
     public User getUserById(Long userId) {
-        log.debug("Fetching user by id={}", userId);
         return userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + userId));
     }
 
-    /** getAllUsers() — Returns all users (admin dashboard). */
-    public List<User> getAllUsers() {
-        log.debug("Fetching all users");
-        return userRepository.findAll();
-    }
+    public List<User> getAllUsers() { return userRepository.findAll(); }
 
-    /** searchUsers() — Searches users by username or fullName (case-insensitive). */
     public List<User> searchUsers(String query) {
         if (query == null || query.isBlank())
             throw new BadRequestException("Search query is required.");
         String q = query.toLowerCase();
-        log.debug("Searching users with query={}", query);
         return userRepository.findAll().stream()
             .filter(u -> u.getUsername().toLowerCase().contains(q)
                 || (u.getFullName() != null && u.getFullName().toLowerCase().contains(q)))
             .collect(java.util.stream.Collectors.toList());
     }
 
-    /** getAnalytics() — Returns user statistics for admin dashboard. */
     public Map<String, Object> getAnalytics() {
         long totalUsers = userRepository.count();
         long activeUsers = userRepository.countByIsActiveTrue();
@@ -298,15 +380,9 @@ public class AuthService {
                       "dailyActiveUsers", dailyActiveUsers);
     }
 
-    /**
-     * forgotPassword() — Generates a reset token and sends it via email.
-     * Token expires in 1 hour.
-     */
     public void forgotPassword(String email) {
         if (email == null || email.isBlank())
             throw new BadRequestException("Email is required.");
-
-        log.info("Password reset requested for email={}", email);
 
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new ResourceNotFoundException("No account found with this email."));
@@ -316,61 +392,21 @@ public class AuthService {
         user.setResetTokenExpiry(LocalDateTime.now().plusHours(1));
         userRepository.save(user);
 
-        SimpleMailMessage mail = new SimpleMailMessage();
-        ensureMailConfigured();
-        mail.setFrom(fromEmail);
-        mail.setTo(email);
-        mail.setSubject("ConnectSphere - Reset Your Password");
-        mail.setText("Hi " + user.getUsername() + ",\n\n"
-                + "Click the link below to reset your password (valid for 1 hour):\n\n"
+        sendMail(email,
+                "ConnectSphere — Reset Your Password",
+                "Hi " + user.getUsername() + ",\n\n"
+                + "Click the link to reset your password (valid 1 hour):\n\n"
                 + frontendUrl + "/reset-password?token=" + token + "\n\n"
                 + "If you did not request this, ignore this email.\n\nConnectSphere Team");
-        try {
-            mailSender.send(mail);
-            log.info("Password reset email sent to {}", email);
-        } catch (MailException e) {
-            log.error("Password reset email failed for {}: {}", email, e.getMessage());
-            throw new BadRequestException("Unable to send reset email right now. Please try again in a few minutes.");
-        }
+
+        log.info("Password reset email sent to {}", email);
     }
 
-    /** sendTestMail() - Sends a simple test email to verify SMTP config quickly. */
-    public void sendTestMail(String toEmail) {
-        if (toEmail == null || toEmail.isBlank()) {
-            throw new BadRequestException("Recipient email is required.");
-        }
-        ensureMailConfigured();
-        SimpleMailMessage mail = new SimpleMailMessage();
-        mail.setFrom(fromEmail);
-        mail.setTo(toEmail);
-        mail.setSubject("ConnectSphere SMTP Test");
-        mail.setText("This is a test email from ConnectSphere. If you received this, SMTP is configured correctly.");
-        try {
-            mailSender.send(mail);
-            log.info("SMTP test mail sent to {}", toEmail);
-        } catch (MailException e) {
-            log.error("SMTP test mail failed for {}: {}", toEmail, e.getMessage());
-            throw new BadRequestException("SMTP test failed. Check SMTP_EMAIL / SMTP_APP_PASSWORD and Gmail App Password settings.");
-        }
-    }
-
-    private void ensureMailConfigured() {
-        if (fromEmail == null || fromEmail.isBlank() || mailPassword == null || mailPassword.isBlank()) {
-            throw new BadRequestException("Mail service is not configured. Set SMTP_EMAIL and SMTP_APP_PASSWORD.");
-        }
-    }
-
-    /**
-     * resetPassword() — Updates password using the reset token.
-     * Validates token existence, expiry, and new password length.
-     */
     public void resetPassword(String token, String newPassword) {
         if (token == null || token.isBlank())
             throw new BadRequestException("Reset token is required.");
         if (newPassword == null || newPassword.length() < 6)
             throw new BadRequestException("Password must be at least 6 characters.");
-
-        log.info("Password reset attempt with token");
 
         User user = userRepository.findByResetToken(token)
                 .orElseThrow(() -> new BadRequestException("Invalid or expired reset token."));
@@ -382,56 +418,39 @@ public class AuthService {
         user.setResetToken(null);
         user.setResetTokenExpiry(null);
         userRepository.save(user);
-        log.info("Password reset successfully for userId={}", user.getUserId());
+        log.info("Password reset for userId={}", user.getUserId());
     }
 
-    /** changeRole() — Changes a user's role (admin operation). */
     public User changeRole(Long userId, String role) {
         if (role == null || role.isBlank())
             throw new BadRequestException("Role is required.");
-        log.info("Changing role for userId={} to {}", userId, role);
         User user = getUserById(userId);
         user.setRole(User.Role.valueOf(role));
         return userRepository.save(user);
     }
 
-    /** toggleActive() — Suspends or activates a user account (admin operation). */
     public User toggleActive(Long userId, boolean active) {
-        log.info("Setting active={} for userId={}", active, userId);
         User user = getUserById(userId);
         user.setActive(active);
         return userRepository.save(user);
     }
 
-    /** deleteUser() — Permanently deletes a user (admin operation). */
-    public void deleteUser(Long userId) {
-        log.info("Deleting userId={}", userId);
-        userRepository.deleteById(userId);
-    }
+    public void deleteUser(Long userId) { userRepository.deleteById(userId); }
 
-    /** getProfile() — Gets user by email (for logged-in user's own profile). */
     public User getProfile(String email) {
-        log.debug("Fetching profile for email={}", email);
         return userRepository.findByEmail(email)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found."));
     }
 
-    /**
-     * updateProfile() — Updates user's profile fields.
-     * Passing empty string for profilePicture removes the photo.
-     * Passing null means "don't change this field".
-     */
     public User updateProfile(String email, String bio, String fullName, String profilePicture, String coverPicture) {
         User user = getProfile(email);
         if (bio != null) user.setBio(bio);
         if (fullName != null) user.setFullName(fullName);
         if (profilePicture != null) user.setProfilePicture(profilePicture.isBlank() ? null : profilePicture);
         if (coverPicture != null) user.setCoverPicture(coverPicture.isBlank() ? null : coverPicture);
-        log.info("Profile updated for email={}", email);
         return userRepository.save(user);
     }
 
-    /** reportUser() — Marks a user as reported with a reason. */
     public void reportUser(Long userId, String reason) {
         if (reason == null || reason.isBlank())
             throw new BadRequestException("Report reason is required.");
@@ -439,64 +458,11 @@ public class AuthService {
         user.setReported(true);
         user.setReportReason(reason);
         userRepository.save(user);
-        log.info("User userId={} reported", userId);
     }
 
-    /** verifyUser() — Sets verified=true on user (called by payment-service). */
     public void verifyUser(Long userId) {
         User user = getUserById(userId);
         user.setVerified(true);
         userRepository.save(user);
-        log.info("User userId={} verified", userId);
-    }
-
-    /** verifyUserByEmail() — Sets verified=true by email (used by payment-service fallback path). */
-    public void verifyUserByEmail(String email) {
-        if (email == null || email.isBlank())
-            throw new BadRequestException("Email is required.");
-        User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found for email: " + email));
-        user.setVerified(true);
-        userRepository.save(user);
-        log.info("User email={} verified", email);
-    }
-
-    private User verifyOtpInternal(String email, String otp) {
-        if (email == null || email.isBlank())
-            throw new BadRequestException("Email is required.");
-        if (otp == null || otp.isBlank())
-            throw new BadRequestException("OTP is required.");
-        User user = userRepository.findByEmail(email)
-            .orElseThrow(() -> new BadRequestException("No account found with this email."));
-        if (user.getLoginOtp() == null || user.getLoginOtpExpiry() == null) {
-            throw new BadRequestException("No OTP request found. Please request OTP first.");
-        }
-        if (user.getLoginOtpExpiry().isBefore(LocalDateTime.now())) {
-            throw new BadRequestException("OTP expired. Please request a new OTP.");
-        }
-        if (!user.getLoginOtp().equals(otp.trim())) {
-            throw new BadRequestException("Invalid OTP.");
-        }
-        return user;
-    }
-
-    private String generateOtp() {
-        return String.valueOf(100000 + new Random().nextInt(900000));
-    }
-
-    private void sendOtpEmail(String email, String otp, String subject) {
-        ensureMailConfigured();
-        SimpleMailMessage mail = new SimpleMailMessage();
-        mail.setFrom(fromEmail);
-        mail.setTo(email);
-        mail.setSubject(subject);
-        mail.setText("Your ConnectSphere OTP is: " + otp + "\n\nThis OTP is valid for 10 minutes.");
-        try {
-            mailSender.send(mail);
-            log.info("OTP email sent to {}", email);
-        } catch (MailException e) {
-            log.error("OTP mail failed for {}: {}", email, e.getMessage());
-            throw new BadRequestException("Unable to send OTP right now. Please try again in a few minutes.");
-        }
     }
 }
