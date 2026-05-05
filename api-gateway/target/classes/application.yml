@@ -7,6 +7,8 @@ spring:
 
   cloud:
     gateway:
+      default-filters:
+        - JwtAuthFilter
       routes:
 
         - id: auth-service
@@ -84,7 +86,7 @@ spring:
 
 # JWT
 jwt:
-  secret: ${JWT_SECRET}
+  secret: connectsphere-local-jwt-secret-key-2026-change-me-minimum-32-chars
 
 # Eureka
 eureka:

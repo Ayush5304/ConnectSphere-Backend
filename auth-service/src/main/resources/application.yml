@@ -35,7 +35,7 @@ server:
   port: 8081
 
 jwt:
-  secret: ${JWT_SECRET}
+  secret: connectsphere-local-jwt-secret-key-2026-change-me-minimum-32-chars
   expiration: 86400000
 
 app:
