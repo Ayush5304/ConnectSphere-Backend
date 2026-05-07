@@ -67,7 +67,7 @@ class MediaServiceTest {
 
     @Test
     void deleteStory_callsRepositoryDeleteById() {
-        mediaService.deleteStory(1L);
+        mediaService.deleteStory(1L, null, null);
         verify(storyRepository).deleteById(1L);
     }
 
