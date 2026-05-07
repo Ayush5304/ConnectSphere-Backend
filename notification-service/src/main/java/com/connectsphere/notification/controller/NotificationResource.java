@@ -3,10 +3,12 @@ package com.connectsphere.notification.controller;
 import com.connectsphere.notification.entity.Notification;
 import com.connectsphere.notification.service.NotificationService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.Map;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @RestController
 @RequestMapping("/notifications")
@@ -30,6 +32,11 @@ public class NotificationResource {
         notificationService.sendEmailNotification(
             body.get("toEmail"), body.get("subject"), body.get("body"));
         return ResponseEntity.ok().build();
+    }
+
+    @GetMapping(value = "/user/{userId}/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter streamForUser(@PathVariable Long userId) {
+        return notificationService.subscribe(userId);
     }
 
     @GetMapping("/user/{userId}")
@@ -61,8 +68,8 @@ public class NotificationResource {
     }
 
     @PostMapping("/admin/global")
-    public ResponseEntity<Void> sendGlobal(@RequestBody Map<String, String> body) {
-        notificationService.sendGlobalNotification(body.get("message"));
-        return ResponseEntity.ok().build();
+    public ResponseEntity<Map<String, Object>> sendGlobal(@RequestBody Map<String, String> body) {
+        Long adminId = body.get("adminId") != null && !body.get("adminId").isBlank() ? Long.parseLong(body.get("adminId")) : null;
+        return ResponseEntity.ok(notificationService.sendGlobalNotification(body.get("message"), adminId));
     }
 }

@@ -267,7 +267,7 @@ public class PostServiceImpl implements PostService {
     @Override
     //@Cacheable(value = "publicFeed")
     public List<Post> getPublicFeed() {
-        return postRepository.findAllByOrderByCreatedAtDesc();
+        return postRepository.findByVisibilityAndDeletedFalseOrderByCreatedAtDesc(Post.Visibility.PUBLIC);
     }
 
     /**
@@ -360,7 +360,7 @@ public class PostServiceImpl implements PostService {
     /** countByUser() — Returns total number of posts by a user */
     @Override
     public long countByUser(Long userId) {
-        return postRepository.countByUserId(userId);
+        return postRepository.findByUserIdAndDeletedFalseOrderByCreatedAtDesc(userId).size();
     }
 
     /**

@@ -21,6 +21,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequiredArgsConstructor
@@ -114,11 +115,28 @@ public class MediaResource {
         return ResponseEntity.ok(mediaService.getStoriesByUser(userId));
     }
 
-    /** DELETE /stories/{storyId} — Delete a story (owner action) */
+    /** DELETE /stories/{storyId} - Delete a story. Owner or ADMIN only. */
     @DeleteMapping("/stories/{storyId}")
-    public ResponseEntity<Void> deleteStory(@PathVariable Long storyId) {
-        mediaService.deleteStory(storyId);
-        return ResponseEntity.noContent().build();
+    public ResponseEntity<?> deleteStory(@PathVariable Long storyId,
+                                          @RequestParam(required = false) Long requesterUserId,
+                                          @RequestParam(required = false) String requesterRole,
+                                          @RequestHeader(value = "X-User-Role", required = false) String gatewayRole) {
+        try {
+            String role = gatewayRole != null ? gatewayRole : requesterRole;
+            mediaService.deleteStory(storyId, requesterUserId, role);
+            return ResponseEntity.ok(Map.of("message", "Story deleted successfully."));
+        } catch (SecurityException e) {
+            return ResponseEntity.status(403).body(Map.of("message", e.getMessage()));
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(404).body(Map.of("message", e.getMessage()));
+        }
+    }
+
+    /** POST /stories/{storyId}/report - Report a story for moderation. */
+    @PostMapping("/stories/{storyId}/report")
+    public ResponseEntity<?> reportStory(@PathVariable Long storyId, @RequestBody Map<String, String> body) {
+        mediaService.reportStory(storyId, body.get("reason"));
+        return ResponseEntity.ok(Map.of("message", "Story reported."));
     }
 
     /**

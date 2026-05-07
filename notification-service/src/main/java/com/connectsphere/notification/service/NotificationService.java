@@ -1,4 +1,4 @@
-package com.connectsphere.notification.service;
+﻿package com.connectsphere.notification.service;
 
 import com.connectsphere.notification.entity.Notification;
 import com.connectsphere.notification.repository.NotificationRepository;
@@ -15,11 +15,15 @@ import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
- * NotificationService — Notification business logic.
+ * NotificationService â€” Notification business logic.
  *
  * Responsibilities:
  *   1. Consumes RabbitMQ events and persists notifications to DB.
@@ -35,6 +39,8 @@ public class NotificationService {
     private final NotificationRepository notificationRepository;
     private final RestTemplate restTemplate;
     private final JavaMailSender mailSender;
+
+    private final Map<Long, CopyOnWriteArrayList<SseEmitter>> liveEmitters = new ConcurrentHashMap<>();
 
     @Value("${auth.service.url}")
     private String authServiceUrl;
@@ -52,7 +58,7 @@ public class NotificationService {
     private static final List<Long> MILESTONES = List.of(10L, 50L, 100L, 500L, 1000L);
 
     /**
-     * handleEvent() — RabbitMQ consumer for notification.queue.
+     * handleEvent() â€” RabbitMQ consumer for notification.queue.
      * Builds and saves a Notification from the incoming event map.
      * Sends milestone email for FOLLOW events.
      */
@@ -80,7 +86,8 @@ public class NotificationService {
             }
 
             n.setDeepLink(buildDeepLink(type, targetId, recipientId));
-            notificationRepository.save(n);
+            Notification saved = notificationRepository.save(n);
+            emitToUser(recipientId, saved);
             log.info("Notification saved for recipientId={} type={}", recipientId, type);
 
             if ("FOLLOW".equals(type)) {
@@ -92,8 +99,8 @@ public class NotificationService {
     }
 
     /**
-     * buildDeepLink() — Builds the frontend URL for the notification click action.
-     * LIKE/COMMENT/REPLY/MENTION → post page; FOLLOW → profile page; default → home.
+     * buildDeepLink() â€” Builds the frontend URL for the notification click action.
+     * LIKE/COMMENT/REPLY/MENTION â†’ post page; FOLLOW â†’ profile page; default â†’ home.
      */
     private String buildDeepLink(String type, Long targetId, Long recipientId) {
         return switch (type) {
@@ -105,7 +112,7 @@ public class NotificationService {
     }
 
     /**
-     * handleFollowEmail() — Sends a congratulation email when a follower milestone is reached.
+     * handleFollowEmail() â€” Sends a congratulation email when a follower milestone is reached.
      * Uses FOLLOW notification count as a proxy for follower count.
      */
     private void handleFollowEmail(Long recipientId, String message) {
@@ -123,7 +130,7 @@ public class NotificationService {
             if (MILESTONES.contains(followNotifCount)) {
                 log.info("Sending milestone email to {} for {} followers", email, followNotifCount);
                 sendEmailNotification(email,
-                        "🎉 You reached " + followNotifCount + " followers on ConnectSphere!",
+                        "ðŸŽ‰ You reached " + followNotifCount + " followers on ConnectSphere!",
                         "Hi " + username + ",\n\nCongratulations! You now have " + followNotifCount
                                 + " followers on ConnectSphere.\n\nKeep sharing great content!\n\nConnectSphere Team");
             }
@@ -132,7 +139,7 @@ public class NotificationService {
         }
     }
 
-    /** fetchUser() — Calls auth-service with internal token to get user details. */
+    /** fetchUser() â€” Calls auth-service with internal token to get user details. */
     @SuppressWarnings("unchecked")
     private Map<String, Object> fetchUser(Long userId) {
         try {
@@ -150,13 +157,45 @@ public class NotificationService {
         }
     }
 
-    /** getForUser() — Returns all notifications for a user, newest first. */
+    public SseEmitter subscribe(Long userId) {
+        SseEmitter emitter = new SseEmitter(0L);
+        liveEmitters.computeIfAbsent(userId, id -> new CopyOnWriteArrayList<>()).add(emitter);
+        emitter.onCompletion(() -> removeEmitter(userId, emitter));
+        emitter.onTimeout(() -> removeEmitter(userId, emitter));
+        emitter.onError(error -> removeEmitter(userId, emitter));
+        try {
+            emitter.send(SseEmitter.event().name("notification:ready").data(Map.of("userId", userId)));
+        } catch (IOException e) {
+            removeEmitter(userId, emitter);
+        }
+        return emitter;
+    }
+
+    private void removeEmitter(Long userId, SseEmitter emitter) {
+        CopyOnWriteArrayList<SseEmitter> emitters = liveEmitters.get(userId);
+        if (emitters == null) return;
+        emitters.remove(emitter);
+        if (emitters.isEmpty()) liveEmitters.remove(userId);
+    }
+
+    private void emitToUser(Long userId, Notification notification) {
+        CopyOnWriteArrayList<SseEmitter> emitters = liveEmitters.get(userId);
+        if (emitters == null || emitters.isEmpty()) return;
+        for (SseEmitter emitter : emitters) {
+            try {
+                emitter.send(SseEmitter.event().name("notification:new").data(notification));
+            } catch (IOException | IllegalStateException e) {
+                removeEmitter(userId, emitter);
+            }
+        }
+    }
+    /** getForUser() â€” Returns all notifications for a user, newest first. */
     public List<Notification> getForUser(Long userId) {
         log.debug("Fetching notifications for userId={}", userId);
         return notificationRepository.findByRecipientIdOrderByCreatedAtDesc(userId);
     }
 
-    /** markRead() — Marks a single notification as read. */
+    /** markRead() â€” Marks a single notification as read. */
     public void markRead(Long notificationId) {
         log.debug("Marking notification id={} as read", notificationId);
         notificationRepository.findById(notificationId).ifPresent(n -> {
@@ -165,24 +204,24 @@ public class NotificationService {
         });
     }
 
-    /** countUnread() — Returns count of unread notifications for a user. */
+    /** countUnread() â€” Returns count of unread notifications for a user. */
     public long countUnread(Long userId) {
         return notificationRepository.countByRecipientIdAndIsReadFalse(userId);
     }
 
-    /** markAllRead() — Marks all notifications as read for a user in one query. */
+    /** markAllRead() â€” Marks all notifications as read for a user in one query. */
     public void markAllRead(Long userId) {
         log.info("Marking all notifications read for userId={}", userId);
         notificationRepository.markAllReadByRecipientId(userId);
     }
 
-    /** delete() — Permanently deletes a notification. */
+    /** delete() â€” Permanently deletes a notification. */
     public void delete(Long notificationId) {
         log.info("Deleting notification id={}", notificationId);
         notificationRepository.deleteById(notificationId);
     }
 
-    /** createNotification() — Creates a notification directly (non-RabbitMQ path). */
+    /** createNotification() â€” Creates a notification directly (non-RabbitMQ path). */
     public Notification createNotification(Long recipientId, String type, String message,
                                             Long actorId, Long targetId, String deepLink) {
         Notification n = new Notification();
@@ -193,10 +232,12 @@ public class NotificationService {
         n.setTargetId(targetId);
         n.setDeepLink(deepLink != null ? deepLink : buildDeepLink(type, targetId, recipientId));
         log.info("Creating direct notification for recipientId={} type={}", recipientId, type);
-        return notificationRepository.save(n);
+        Notification saved = notificationRepository.save(n);
+        emitToUser(recipientId, saved);
+        return saved;
     }
 
-    /** sendEmailNotification() — Sends a plain-text email. Failure is logged, not thrown. */
+    /** sendEmailNotification() â€” Sends a plain-text email. Failure is logged, not thrown. */
     public void sendEmailNotification(String toEmail, String subject, String body) {
         try {
             SimpleMailMessage mail = new SimpleMailMessage();
@@ -212,11 +253,15 @@ public class NotificationService {
     }
 
     /**
-     * sendGlobalNotification() — Sends a notification to ALL users (admin feature).
+     * sendGlobalNotification() â€” Sends a notification to ALL users (admin feature).
      * Falls back to notifying known users from existing notifications if auth-service is down.
      */
-    public void sendGlobalNotification(String message) {
+    public Map<String, Object> sendGlobalNotification(String message, Long adminId) {
+        if (message == null || message.isBlank()) {
+            throw new IllegalArgumentException("Broadcast message is required.");
+        }
         log.info("Sending global notification: {}", message);
+        int created = 0;
         try {
             HttpHeaders headers = new HttpHeaders();
             headers.set("Authorization", "Bearer " + internalToken);
@@ -228,32 +273,30 @@ public class NotificationService {
             ).getBody();
 
             if (users != null) {
-                users.forEach(u -> {
+                for (Map<String, Object> u : users) {
                     try {
                         Long recipientId = Long.parseLong(u.get("userId").toString());
-                        Notification n = new Notification();
-                        n.setRecipientId(recipientId);
-                        n.setType("GLOBAL");
-                        n.setMessage(message);
-                        n.setDeepLink(frontendUrl + "/");
-                        notificationRepository.save(n);
+                        String role = String.valueOf(u.getOrDefault("role", "USER"));
+                        Boolean active = u.containsKey("active") ? Boolean.valueOf(String.valueOf(u.get("active"))) : Boolean.TRUE;
+                        if ((adminId != null && adminId.equals(recipientId)) || "ADMIN".equalsIgnoreCase(role) || "GUEST".equalsIgnoreCase(role) || !active) {
+                            continue;
+                        }
+                        Notification saved = createNotification(recipientId, "GLOBAL", message, adminId, null, frontendUrl + "/");
+                        if (saved != null) created++;
                     } catch (Exception e) {
                         log.warn("Failed to create global notification for user: {}", e.getMessage());
                     }
-                });
+                }
             }
         } catch (Exception e) {
             log.warn("Auth-service unavailable for global notification, using fallback: {}", e.getMessage());
-            notificationRepository.findAll().stream()
-                    .map(Notification::getRecipientId).distinct()
-                    .forEach(recipientId -> {
-                        Notification n = new Notification();
-                        n.setRecipientId(recipientId);
-                        n.setType("GLOBAL");
-                        n.setMessage(message);
-                        n.setDeepLink(frontendUrl + "/");
-                        notificationRepository.save(n);
-                    });
+            for (Long recipientId : notificationRepository.findAll().stream().map(Notification::getRecipientId).distinct().toList()) {
+                if (adminId != null && adminId.equals(recipientId)) continue;
+                Notification saved = createNotification(recipientId, "GLOBAL", message, adminId, null, frontendUrl + "/");
+                if (saved != null) created++;
+            }
         }
+        return Map.of("message", "Broadcast sent.", "created", created);
     }
 }
+

@@ -1,4 +1,4 @@
-package com.connectsphere.gateway;
+﻿package com.connectsphere.gateway;
 
 import io.jsonwebtoken.Claims;
 import org.springframework.beans.factory.annotation.Value;
@@ -82,49 +82,49 @@ public class JwtAuthFilter extends AbstractGatewayFilterFactory<JwtAuthFilter.Co
             String path = exchange.getRequest().getURI().getPath();
             HttpMethod method = exchange.getRequest().getMethod();
 
-            // ✅ 1. Allow CORS preflight (VERY IMPORTANT)
+            // âœ… 1. Allow CORS preflight (VERY IMPORTANT)
             if (exchange.getRequest().getMethod() == HttpMethod.OPTIONS) {
                 return chain.filter(exchange);
             }
 
-            // ✅ DEBUG (optional)
+            // âœ… DEBUG (optional)
             System.out.println("Incoming Path: " + path);
 
-            // ✅ 2. Allow public APIs
+            // âœ… 2. Allow public APIs
             if (isPublic(path, method)) {
                 return chain.filter(exchange);
             }
 
-            // ✅ 3. Get Authorization header
+            // âœ… 3. Get Authorization header
             String authHeader = exchange.getRequest()
                     .getHeaders()
                     .getFirst(HttpHeaders.AUTHORIZATION);
 
-            // ❌ 4. No token → Unauthorized
+            // âŒ 4. No token â†’ Unauthorized
             if (authHeader == null || !authHeader.startsWith("Bearer ")) {
                 return unauthorized(exchange);
             }
 
-            // ✅ 5. Extract token
+            // âœ… 5. Extract token
             String token = authHeader.substring(7);
 
-            // ✅ 6. Internal service bypass
+            // âœ… 6. Internal service bypass
             if (token.equals(internalToken)) {
                 return chain.filter(exchange);
             }
 
-            // ❌ 7. Invalid token
+            // âŒ 7. Invalid token
             if (!jwtUtil.isValid(token)) {
                 return unauthorized(exchange);
             }
 
             try {
-                // ✅ 8. Extract user info
+                // âœ… 8. Extract user info
                 Claims claims = jwtUtil.getClaims(token);
                 String email = claims.getSubject();
                 String role = claims.get("role", String.class);
 
-                // ✅ 9. Add headers for downstream services
+                // âœ… 9. Add headers for downstream services
                 ServerWebExchange mutated = exchange.mutate()
                         .request(r -> r.header("X-User-Email", email)
                                 .header("X-User-Role", role != null ? role : "USER"))
@@ -141,6 +141,11 @@ public class JwtAuthFilter extends AbstractGatewayFilterFactory<JwtAuthFilter.Co
     private boolean isPublic(String path, HttpMethod method) {
         if (PUBLIC_EXACT.contains(path)) return true;
         if (PUBLIC_ANY_METHOD_PREFIXES.stream().anyMatch(path::startsWith)) return true;
+        if (HttpMethod.GET.equals(method)
+                && path.startsWith("/api/notifications/user/")
+                && path.endsWith("/stream")) {
+            return true;
+        }
         return HttpMethod.GET.equals(method)
                 && PUBLIC_GET_PREFIXES.stream().anyMatch(path::startsWith)
                 && !path.contains("/admin/");
@@ -154,3 +159,4 @@ public class JwtAuthFilter extends AbstractGatewayFilterFactory<JwtAuthFilter.Co
     public static class Config {
     }
 }
+

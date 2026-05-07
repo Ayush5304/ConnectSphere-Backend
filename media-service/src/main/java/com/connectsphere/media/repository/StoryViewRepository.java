@@ -9,4 +9,5 @@ public interface StoryViewRepository extends JpaRepository<StoryView, Long> {
     List<StoryView> findByStoryIdOrderByViewedAtDesc(Long storyId);
     Optional<StoryView> findByStoryIdAndViewerUserId(Long storyId, Long viewerUserId);
     long countByStoryId(Long storyId);
+    void deleteByStoryId(Long storyId);
 }

@@ -23,6 +23,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -208,9 +209,41 @@ public class MediaService {
             List.of(userId), LocalDateTime.now());
     }
 
-    /** deleteStory() — Hard deletes a story (owner action) */
-    public void deleteStory(Long storyId) {
-        storyRepository.deleteById(storyId);
+    private void deleteMediaFile(String mediaUrl) {
+        if (mediaUrl == null || mediaUrl.isBlank()) return;
+        try {
+            String filename = mediaUrl.substring(mediaUrl.lastIndexOf('/') + 1);
+            Path uploadPath = Paths.get(uploadDir).toAbsolutePath().normalize();
+            Path file = uploadPath.resolve(filename).normalize();
+            if (file.startsWith(uploadPath)) {
+                Files.deleteIfExists(file);
+            }
+        } catch (Exception ignored) {}
+    }
+
+    /** deleteStory() - Deletes a story only when requested by owner or admin. */
+    @Transactional
+    public void deleteStory(Long storyId, Long requesterUserId, String requesterRole) {
+        Story story = storyRepository.findById(storyId)
+            .orElseThrow(() -> new RuntimeException("Story not found"));
+
+        boolean admin = requesterRole != null && "ADMIN".equalsIgnoreCase(requesterRole);
+        boolean owner = requesterUserId != null && story.getUserId().equals(requesterUserId);
+        if (!admin && !owner) {
+            throw new SecurityException("You can delete only your own story.");
+        }
+
+        storyViewRepository.deleteByStoryId(storyId);
+        deleteMediaFile(story.getMediaUrl());
+        storyRepository.delete(story);
+    }
+
+    public void reportStory(Long storyId, String reason) {
+        Story story = storyRepository.findById(storyId)
+            .orElseThrow(() -> new RuntimeException("Story not found"));
+        story.setReported(true);
+        story.setReportReason(reason != null ? reason : "Reported from story viewer");
+        storyRepository.save(story);
     }
 
     /**
@@ -289,13 +322,7 @@ public class MediaService {
             expired.forEach(s -> {
                 try {
                     /* Extract filename from URL */
-                    String filename = s.getMediaUrl()
-                        .substring(s.getMediaUrl().lastIndexOf('/') + 1);
-                    Path file = uploadPath.resolve(filename).normalize();
-                    /* Security check before deleting */
-                    if (file.startsWith(uploadPath)) {
-                        Files.deleteIfExists(file);
-                    }
+                    deleteMediaFile(s.getMediaUrl());
                 } catch (Exception ignored) {}
             });
             /* Delete all expired story records from database */

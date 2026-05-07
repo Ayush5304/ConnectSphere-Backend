@@ -40,10 +40,16 @@ public class Story {
     /** viewCount — Number of unique users who viewed this story */
     private int viewCount = 0;
 
-    /** expired — Whether this story has been marked as expired */
+    /** expired - Whether this story has been marked as expired */
     private boolean expired = false;
 
-    /** createdAt — When the story was posted (set automatically) */
+    /** reported - Moderation flag set when a viewer reports the story */
+    private boolean reported = false;
+
+    /** reportReason - Latest reason provided by a viewer or admin */
+    private String reportReason;
+
+/** createdAt — When the story was posted (set automatically) */
     private LocalDateTime createdAt;
 
     /**
