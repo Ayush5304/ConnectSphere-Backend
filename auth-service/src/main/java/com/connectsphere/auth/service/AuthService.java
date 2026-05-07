@@ -382,6 +382,8 @@ public class AuthService {
         map.put("fullName", user.getFullName() != null ? user.getFullName() : "");
         map.put("bio", user.getBio() != null ? user.getBio() : "");
         map.put("profilePicture", user.getProfilePicture() != null ? user.getProfilePicture() : "");
+        map.put("coverPicture", user.getCoverPicture() != null ? user.getCoverPicture() : "");
+        map.put("verified", Boolean.toString(user.isVerified()));
         return map;
     }
 
@@ -475,13 +477,53 @@ public class AuthService {
                 .orElseThrow(() -> new ResourceNotFoundException("User not found."));
     }
 
-    public User updateProfile(String email, String bio, String fullName, String profilePicture, String coverPicture) {
+    public User updateProfile(String email, String bio, String fullName, String username, String profilePicture, String coverPicture) {
         User user = getProfile(email);
-        if (bio != null) user.setBio(bio);
-        if (fullName != null) user.setFullName(fullName);
+
+        if (bio != null) {
+            String cleanedBio = bio.trim();
+            if (cleanedBio.length() > 150) {
+                throw new BadRequestException("Bio must be 150 characters or less.");
+            }
+            user.setBio(cleanedBio);
+        }
+
+        if (fullName != null) user.setFullName(fullName.trim());
+        if (username != null && !username.isBlank()) user.setUsername(username.trim().replaceAll("\\s+", "").toLowerCase());
         if (profilePicture != null) user.setProfilePicture(profilePicture.isBlank() ? null : profilePicture);
         if (coverPicture != null) user.setCoverPicture(coverPicture.isBlank() ? null : coverPicture);
+
         return userRepository.save(user);
+    }
+
+    public User updateProfileByUserId(Long userId, String bio, String fullName, String username, String profilePicture, String coverPicture) {
+        User existing = getUserById(userId);
+
+        String cleanedBio = bio != null ? bio.trim() : existing.getBio();
+        if (cleanedBio != null && cleanedBio.length() > 150) {
+            throw new BadRequestException("Bio must be 150 characters or less.");
+        }
+
+        String cleanedFullName = fullName != null ? fullName.trim() : existing.getFullName();
+        String cleanedUsername = username != null && !username.isBlank()
+                ? username.trim().replaceAll("\\s+", "").toLowerCase()
+                : existing.getUsername();
+        String cleanedProfilePicture = profilePicture != null
+                ? (profilePicture.isBlank() ? null : profilePicture)
+                : existing.getProfilePicture();
+        String cleanedCoverPicture = coverPicture != null
+                ? (coverPicture.isBlank() ? null : coverPicture)
+                : existing.getCoverPicture();
+
+        userRepository.updateProfileFields(
+                userId,
+                cleanedBio,
+                cleanedFullName,
+                cleanedUsername,
+                cleanedProfilePicture,
+                cleanedCoverPicture);
+
+        return getUserById(userId);
     }
 
     public void reportUser(Long userId, String reason) {

@@ -149,8 +149,24 @@ public class AuthResource {
     public ResponseEntity<User> updateProfile(@AuthenticationPrincipal String email,
                                                @RequestBody Map<String, String> body) {
         return ResponseEntity.ok(authService.updateProfile(
-                email, body.get("bio"), body.get("fullName"),
-                body.get("profilePicture"), body.get("coverPicture")));
+                email,
+                body.get("bio"),
+                body.get("fullName"),
+                body.get("username"),
+                body.get("profilePicture"),
+                body.get("coverPicture")));
+    }
+
+    @PutMapping("/user/{userId}/profile")
+    public ResponseEntity<User> updateProfileByUserId(@PathVariable Long userId,
+                                                       @RequestBody Map<String, String> body) {
+        return ResponseEntity.ok(authService.updateProfileByUserId(
+                userId,
+                body.get("bio"),
+                body.get("fullName"),
+                body.get("username"),
+                body.get("profilePicture"),
+                body.get("coverPicture")));
     }
 
     @PostMapping("/user/{userId}/report")
