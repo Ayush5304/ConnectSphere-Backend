@@ -11,8 +11,6 @@ import java.util.Map;
 
 /**
  * AuthResource.java — Authentication REST Controller
- *
- * BUG-FIX: Added 4 missing OTP endpoints that the frontend was calling:
  *   POST /auth/otp/login/request    — send OTP to email for login
  *   POST /auth/otp/login/verify     — verify OTP and return JWT
  *   POST /auth/otp/register/request — send OTP to email for registration
@@ -154,7 +152,8 @@ public class AuthResource {
                 body.get("fullName"),
                 body.get("username"),
                 body.get("profilePicture"),
-                body.get("coverPicture")));
+                body.get("coverPicture"),
+                body.get("privateAccount")));
     }
 
     @PutMapping("/user/{userId}/profile")
@@ -166,7 +165,8 @@ public class AuthResource {
                 body.get("fullName"),
                 body.get("username"),
                 body.get("profilePicture"),
-                body.get("coverPicture")));
+                body.get("coverPicture"),
+                body.get("privateAccount")));
     }
 
     @PostMapping("/user/{userId}/report")

@@ -384,6 +384,7 @@ public class AuthService {
         map.put("profilePicture", user.getProfilePicture() != null ? user.getProfilePicture() : "");
         map.put("coverPicture", user.getCoverPicture() != null ? user.getCoverPicture() : "");
         map.put("verified", Boolean.toString(user.isVerified()));
+        map.put("privateAccount", Boolean.toString(user.isPrivateAccount()));
         return map;
     }
 
@@ -477,7 +478,7 @@ public class AuthService {
                 .orElseThrow(() -> new ResourceNotFoundException("User not found."));
     }
 
-    public User updateProfile(String email, String bio, String fullName, String username, String profilePicture, String coverPicture) {
+    public User updateProfile(String email, String bio, String fullName, String username, String profilePicture, String coverPicture, String privateAccount) {
         User user = getProfile(email);
 
         if (bio != null) {
@@ -492,11 +493,12 @@ public class AuthService {
         if (username != null && !username.isBlank()) user.setUsername(username.trim().replaceAll("\\s+", "").toLowerCase());
         if (profilePicture != null) user.setProfilePicture(profilePicture.isBlank() ? null : profilePicture);
         if (coverPicture != null) user.setCoverPicture(coverPicture.isBlank() ? null : coverPicture);
+        if (privateAccount != null) user.setPrivateAccount(Boolean.parseBoolean(privateAccount));
 
         return userRepository.save(user);
     }
 
-    public User updateProfileByUserId(Long userId, String bio, String fullName, String username, String profilePicture, String coverPicture) {
+    public User updateProfileByUserId(Long userId, String bio, String fullName, String username, String profilePicture, String coverPicture, String privateAccount) {
         User existing = getUserById(userId);
 
         String cleanedBio = bio != null ? bio.trim() : existing.getBio();
@@ -514,6 +516,9 @@ public class AuthService {
         String cleanedCoverPicture = coverPicture != null
                 ? (coverPicture.isBlank() ? null : coverPicture)
                 : existing.getCoverPicture();
+        boolean cleanedPrivateAccount = privateAccount != null
+                ? Boolean.parseBoolean(privateAccount)
+                : existing.isPrivateAccount();
 
         userRepository.updateProfileFields(
                 userId,
@@ -521,7 +526,8 @@ public class AuthService {
                 cleanedFullName,
                 cleanedUsername,
                 cleanedProfilePicture,
-                cleanedCoverPicture);
+                cleanedCoverPicture,
+                cleanedPrivateAccount);
 
         return getUserById(userId);
     }

@@ -107,6 +107,7 @@ public class NotificationService {
             case "LIKE", "COMMENT", "REPLY", "MENTION" ->
                 targetId != null ? frontendUrl + "/post/" + targetId : frontendUrl + "/";
             case "FOLLOW" -> frontendUrl + "/profile/" + recipientId;
+            case "FOLLOW_REQUEST" -> frontendUrl + "/notifications";
             default -> frontendUrl + "/";
         };
     }

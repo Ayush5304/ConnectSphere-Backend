@@ -27,7 +27,8 @@ public interface UserRepository extends JpaRepository<User, Long> {
                u.fullName = :fullName,
                u.username = :username,
                u.profilePicture = :profilePicture,
-               u.coverPicture = :coverPicture
+               u.coverPicture = :coverPicture,
+               u.privateAccount = :privateAccount
          where u.userId = :userId
     """)
     int updateProfileFields(@Param("userId") Long userId,
@@ -35,5 +36,6 @@ public interface UserRepository extends JpaRepository<User, Long> {
                             @Param("fullName") String fullName,
                             @Param("username") String username,
                             @Param("profilePicture") String profilePicture,
-                            @Param("coverPicture") String coverPicture);
+                            @Param("coverPicture") String coverPicture,
+                            @Param("privateAccount") boolean privateAccount);
 }

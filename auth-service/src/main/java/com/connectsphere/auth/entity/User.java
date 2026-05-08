@@ -36,6 +36,7 @@ public class User {
     private String reportReason;
     private boolean verified = false;
     private boolean pendingRegistration = false;
+    private boolean privateAccount = false;
 
     // ── OTP fields for login-via-OTP ──────────────────────────────────────────
     /** 6-digit OTP for email-based login */
@@ -81,6 +82,8 @@ public class User {
     public void setVerified(boolean verified) { this.verified = verified; }
     public boolean isPendingRegistration() { return pendingRegistration; }
     public void setPendingRegistration(boolean pendingRegistration) { this.pendingRegistration = pendingRegistration; }
+    public boolean isPrivateAccount() { return privateAccount; }
+    public void setPrivateAccount(boolean privateAccount) { this.privateAccount = privateAccount; }
     public String getLoginOtp() { return loginOtp; }
     public void setLoginOtp(String otp) { this.loginOtp = otp; }
     public java.time.LocalDateTime getLoginOtpExpiry() { return loginOtpExpiry; }
