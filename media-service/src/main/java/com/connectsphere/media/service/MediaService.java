@@ -42,6 +42,12 @@ public class MediaService {
     private final StoryRepository storyRepository;
     private final com.connectsphere.media.repository.StoryViewRepository storyViewRepository;
 
+    public MediaService(StoryRepository storyRepository,
+                        com.connectsphere.media.repository.StoryViewRepository storyViewRepository) {
+        this.storyRepository = storyRepository;
+        this.storyViewRepository = storyViewRepository;
+    }
+
     /** uploadDir — Directory where uploaded files are stored */
     @Value("${media.upload.dir:uploads/}")
     private String uploadDir;
@@ -88,11 +94,15 @@ public class MediaService {
      * Controller catches this and returns 400 Bad Request
      */
     private void validate(MultipartFile file) {
-        /* Check MIME type */
-        String contentType = file.getContentType();
-        if (contentType == null || !ALLOWED_TYPES.containsKey(contentType)) {
+        /* Check MIME type. Browser camera recordings may include codecs
+         * (for example video/webm;codecs=vp9), so normalize to the base type. */
+        String rawContentType = file.getContentType();
+        String contentType = rawContentType != null
+                ? rawContentType.toLowerCase().split(";")[0].trim()
+                : "";
+        if (!ALLOWED_TYPES.containsKey(contentType)) {
             throw new IllegalArgumentException(
-                "Unsupported file type: " + contentType +
+                "Unsupported file type: " + rawContentType +
                 ". Allowed: JPEG, PNG, WebP, MP4, WebM.");
         }
 
@@ -187,7 +197,10 @@ public class MediaService {
         story.setUserId(userId);
         story.setUsername(username);
         story.setMediaUrl(url);
-        story.setMediaType(file.getContentType());
+        String storyType = file.getContentType() != null
+                ? file.getContentType().toLowerCase().split(";")[0].trim()
+                : "application/octet-stream";
+        story.setMediaType(storyType);
         return storyRepository.save(story);
     }
 
