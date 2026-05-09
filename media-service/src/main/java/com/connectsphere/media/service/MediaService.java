@@ -8,7 +8,7 @@
  *   4. Automatic cleanup of expired stories (scheduled job)
  *
  * Security measures:
- *   - MIME type validation (only jpeg/png/webp/mp4 allowed)
+ *   - MIME type validation (only jpeg/png/webp/mp4/webm allowed)
  *   - File extension validation (extra guard against spoofed MIME types)
  *   - File size limits (10MB images, 100MB videos)
  *   - UUID filenames (prevents path traversal attacks)
@@ -63,7 +63,8 @@ public class MediaService {
         "image/jpeg", "image",
         "image/png",  "image",
         "image/webp", "image",
-        "video/mp4",  "video"
+        "video/mp4",  "video",
+        "video/webm", "video"
     );
 
     /**
@@ -72,7 +73,7 @@ public class MediaService {
      * Prevents attackers from uploading .exe files with image MIME type
      */
     private static final Set<String> ALLOWED_EXTENSIONS = Set.of(
-        ".jpg", ".jpeg", ".png", ".webp", ".mp4"
+        ".jpg", ".jpeg", ".png", ".webp", ".mp4", ".webm"
     );
 
     /**
@@ -92,7 +93,7 @@ public class MediaService {
         if (contentType == null || !ALLOWED_TYPES.containsKey(contentType)) {
             throw new IllegalArgumentException(
                 "Unsupported file type: " + contentType +
-                ". Allowed: JPEG, PNG, WebP, MP4.");
+                ". Allowed: JPEG, PNG, WebP, MP4, WebM.");
         }
 
         /* Check file extension */

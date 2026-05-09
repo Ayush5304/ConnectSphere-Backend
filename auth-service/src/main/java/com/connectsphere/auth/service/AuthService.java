@@ -499,37 +499,25 @@ public class AuthService {
     }
 
     public User updateProfileByUserId(Long userId, String bio, String fullName, String username, String profilePicture, String coverPicture, String privateAccount) {
-        User existing = getUserById(userId);
+        User user = getUserById(userId);
 
-        String cleanedBio = bio != null ? bio.trim() : existing.getBio();
-        if (cleanedBio != null && cleanedBio.length() > 150) {
-            throw new BadRequestException("Bio must be 150 characters or less.");
+        if (bio != null) {
+            String cleanedBio = bio.trim();
+            if (cleanedBio.length() > 150) {
+                throw new BadRequestException("Bio must be 150 characters or less.");
+            }
+            user.setBio(cleanedBio);
         }
 
-        String cleanedFullName = fullName != null ? fullName.trim() : existing.getFullName();
-        String cleanedUsername = username != null && !username.isBlank()
-                ? username.trim().replaceAll("\\s+", "").toLowerCase()
-                : existing.getUsername();
-        String cleanedProfilePicture = profilePicture != null
-                ? (profilePicture.isBlank() ? null : profilePicture)
-                : existing.getProfilePicture();
-        String cleanedCoverPicture = coverPicture != null
-                ? (coverPicture.isBlank() ? null : coverPicture)
-                : existing.getCoverPicture();
-        boolean cleanedPrivateAccount = privateAccount != null
-                ? Boolean.parseBoolean(privateAccount)
-                : existing.isPrivateAccount();
+        if (fullName != null) user.setFullName(fullName.trim());
+        if (username != null && !username.isBlank()) {
+            user.setUsername(username.trim().replaceAll("\\s+", "").toLowerCase());
+        }
+        if (profilePicture != null) user.setProfilePicture(profilePicture.isBlank() ? null : profilePicture);
+        if (coverPicture != null) user.setCoverPicture(coverPicture.isBlank() ? null : coverPicture);
+        if (privateAccount != null) user.setPrivateAccount(Boolean.parseBoolean(privateAccount));
 
-        userRepository.updateProfileFields(
-                userId,
-                cleanedBio,
-                cleanedFullName,
-                cleanedUsername,
-                cleanedProfilePicture,
-                cleanedCoverPicture,
-                cleanedPrivateAccount);
-
-        return getUserById(userId);
+        return userRepository.saveAndFlush(user);
     }
 
     public void reportUser(Long userId, String reason) {

@@ -48,7 +48,7 @@ class FollowServiceTest {
         saved.setFollowingId(2L);
         when(followRepository.save(any())).thenReturn(saved);
 
-        Follow result = followService.follow(1L, 2L);
+        Follow result = (Follow) followService.follow(1L, 2L);
 
         assertNotNull(result);
         assertEquals(1L, result.getFollowerId());

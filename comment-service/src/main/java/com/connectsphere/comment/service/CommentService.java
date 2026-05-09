@@ -136,7 +136,7 @@ public class CommentService {
      * @param postId ID of the post
      */
     public List<Comment> getByPost(Long postId) {
-        log.debug("Fetching comments for post id={}", postId);
+        log.debug("Fetching comments for post id= }", postId);
         return commentRepository
             .findByPostIdAndParentCommentIdIsNullAndDeletedFalseOrderByCreatedAtAsc(postId);
     }
