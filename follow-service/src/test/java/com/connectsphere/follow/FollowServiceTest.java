@@ -1,7 +1,10 @@
 package com.connectsphere.follow;
 
 import com.connectsphere.follow.entity.Follow;
+import com.connectsphere.follow.entity.FollowRequest;
+import com.connectsphere.follow.entity.FollowRequest.Status;
 import com.connectsphere.follow.repository.FollowRepository;
+import com.connectsphere.follow.repository.FollowRequestRepository;
 import com.connectsphere.follow.service.FollowService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -18,17 +21,14 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-/**
- * FollowServiceTest — Unit tests for FollowService.
- * Uses Mockito to mock all dependencies.
- */
 @ExtendWith(MockitoExtension.class)
 class FollowServiceTest {
 
     @Mock FollowRepository followRepository;
+    @Mock FollowRequestRepository followRequestRepository;
     @Mock RabbitTemplate rabbitTemplate;
     @Mock RestTemplate restTemplate;
     @InjectMocks FollowService followService;
@@ -38,28 +38,62 @@ class FollowServiceTest {
         ReflectionTestUtils.setField(followService, "authServiceUrl", "http://localhost:8081");
     }
 
-    /* ── follow() tests ────────────────────────────────────────────── */
-
     @Test
-    void follow_success_savesAndReturns() {
+    void follow_publicAccount_createsFollowAndReturnsFollowingStatus() {
         when(followRepository.existsByFollowerIdAndFollowingId(1L, 2L)).thenReturn(false);
-        Follow saved = new Follow();
-        saved.setFollowerId(1L);
-        saved.setFollowingId(2L);
-        when(followRepository.save(any())).thenReturn(saved);
+        when(restTemplate.getForObject("http://localhost:8081/auth/user/2", Map.class))
+            .thenReturn(Map.of("privateAccount", false, "username", "target"));
+        when(restTemplate.getForObject("http://localhost:8081/auth/user/1", Map.class))
+            .thenReturn(Map.of("username", "ayush"));
+        when(followRepository.save(any(Follow.class))).thenAnswer(invocation -> {
+            Follow follow = invocation.getArgument(0);
+            follow.setFollowId(10L);
+            return follow;
+        });
 
-        Follow result = (Follow) followService.follow(1L, 2L);
+        Map<String, Object> result = followService.follow(1L, 2L);
 
-        assertNotNull(result);
-        assertEquals(1L, result.getFollowerId());
-        assertEquals(2L, result.getFollowingId());
+        assertEquals("FOLLOWING", result.get("status"));
+        assertEquals(true, result.get("following"));
+        assertEquals(false, result.get("requested"));
         verify(followRepository).save(any(Follow.class));
+        verify(rabbitTemplate).convertAndSend(eq("connectsphere.events"), eq("follow.created"), any(Map.class));
     }
 
     @Test
-    void follow_alreadyFollowing_throwsRuntimeException() {
+    void follow_privateAccount_createsPendingRequestInsteadOfFollow() {
+        when(followRepository.existsByFollowerIdAndFollowingId(1L, 2L)).thenReturn(false);
+        when(restTemplate.getForObject("http://localhost:8081/auth/user/2", Map.class))
+            .thenReturn(Map.of("privateAccount", true, "username", "privateUser"));
+        when(restTemplate.getForObject("http://localhost:8081/auth/user/1", Map.class))
+            .thenReturn(Map.of("username", "ayush"));
+        when(followRequestRepository.findByFollowerIdAndFollowingId(1L, 2L)).thenReturn(Optional.empty());
+        when(followRequestRepository.save(any(FollowRequest.class))).thenAnswer(invocation -> {
+            FollowRequest request = invocation.getArgument(0);
+            request.setRequestId(55L);
+            return request;
+        });
+
+        Map<String, Object> result = followService.follow(1L, 2L);
+
+        assertEquals("REQUESTED", result.get("status"));
+        assertEquals(false, result.get("following"));
+        assertEquals(true, result.get("requested"));
+        assertEquals(55L, result.get("requestId"));
+        verify(followRepository, never()).save(any(Follow.class));
+        verify(rabbitTemplate).convertAndSend(eq("connectsphere.events"), eq("follow.requested"), any(Map.class));
+    }
+
+    @Test
+    void follow_alreadyFollowing_returnsFollowingStatusWithoutSaving() {
         when(followRepository.existsByFollowerIdAndFollowingId(1L, 2L)).thenReturn(true);
-        assertThrows(RuntimeException.class, () -> followService.follow(1L, 2L));
+
+        Map<String, Object> result = followService.follow(1L, 2L);
+
+        assertEquals("FOLLOWING", result.get("status"));
+        assertEquals(true, result.get("following"));
+        verify(followRepository, never()).save(any());
+        verifyNoInteractions(followRequestRepository);
     }
 
     @Test
@@ -72,32 +106,29 @@ class FollowServiceTest {
         assertThrows(RuntimeException.class, () -> followService.follow(null, 2L));
     }
 
-    /* ── unfollow() tests ──────────────────────────────────────────── */
-
     @Test
-    void unfollow_existingFollow_deletesIt() {
-        Follow follow = new Follow();
-        follow.setFollowerId(1L);
-        follow.setFollowingId(2L);
-        when(followRepository.findByFollowerIdAndFollowingId(1L, 2L))
-            .thenReturn(Optional.of(follow));
+    void unfollow_removesFollowAndPendingRequestIfPresent() {
+        FollowRequest request = new FollowRequest();
+        request.setRequestId(7L);
+        request.setFollowerId(1L);
+        request.setFollowingId(2L);
+        when(followRequestRepository.findByFollowerIdAndFollowingId(1L, 2L)).thenReturn(Optional.of(request));
 
         followService.unfollow(1L, 2L);
 
-        verify(followRepository).delete(follow);
+        verify(followRepository).deleteAllByPair(1L, 2L);
+        verify(followRequestRepository).delete(request);
     }
 
     @Test
-    void unfollow_notFollowing_doesNothing() {
-        when(followRepository.findByFollowerIdAndFollowingId(1L, 2L))
-            .thenReturn(Optional.empty());
+    void unfollow_withoutPendingRequestOnlyDeletesFollowPair() {
+        when(followRequestRepository.findByFollowerIdAndFollowingId(1L, 2L)).thenReturn(Optional.empty());
 
         followService.unfollow(1L, 2L);
 
-        verify(followRepository, never()).delete(any());
+        verify(followRepository).deleteAllByPair(1L, 2L);
+        verify(followRequestRepository, never()).delete(any());
     }
-
-    /* ── isFollowing() tests ───────────────────────────────────────── */
 
     @Test
     void isFollowing_returnsTrue_whenFollowExists() {
@@ -111,53 +142,103 @@ class FollowServiceTest {
         assertFalse(followService.isFollowing(1L, 2L));
     }
 
-    /* ── getFollowing() tests ──────────────────────────────────────── */
-
     @Test
-    void getFollowing_returnsListOfFollowingIds() {
-        Follow f1 = new Follow(); f1.setFollowingId(2L);
-        Follow f2 = new Follow(); f2.setFollowingId(3L);
-        when(followRepository.findByFollowerId(1L)).thenReturn(List.of(f1, f2));
+    void getFollowing_returnsDistinctFollowingIds() {
+        when(followRepository.findDistinctFollowingIds(1L)).thenReturn(List.of(2L, 3L));
 
         List<Long> result = followService.getFollowing(1L);
 
-        assertEquals(2, result.size());
-        assertTrue(result.contains(2L));
-        assertTrue(result.contains(3L));
+        assertEquals(List.of(2L, 3L), result);
     }
 
-    /* ── getFollowers() tests ──────────────────────────────────────── */
-
     @Test
-    void getFollowers_returnsListOfFollowerIds() {
-        Follow f1 = new Follow(); f1.setFollowerId(3L);
-        when(followRepository.findByFollowingId(2L)).thenReturn(List.of(f1));
+    void getFollowers_returnsDistinctFollowerIds() {
+        when(followRepository.findDistinctFollowerIds(2L)).thenReturn(List.of(1L, 3L));
 
         List<Long> result = followService.getFollowers(2L);
 
-        assertEquals(1, result.size());
-        assertEquals(3L, result.get(0));
+        assertEquals(List.of(1L, 3L), result);
     }
 
-    /* ── getCounts() tests ─────────────────────────────────────────── */
-
     @Test
-    void getCounts_returnsFollowingAndFollowerCounts() {
-        when(followRepository.countByFollowerId(1L)).thenReturn(5L);
-        when(followRepository.countByFollowingId(1L)).thenReturn(10L);
+    void getCounts_returnsDistinctCounts() {
+        when(followRepository.countDistinctFollowing(1L)).thenReturn(2L);
+        when(followRepository.countDistinctFollowers(1L)).thenReturn(4L);
 
         Map<String, Long> counts = followService.getCounts(1L);
 
-        assertEquals(5L, counts.get("following"));
-        assertEquals(10L, counts.get("followers"));
+        assertEquals(2L, counts.get("following"));
+        assertEquals(4L, counts.get("followers"));
     }
 
-    /* ── isMutual() tests ──────────────────────────────────────────── */
+    @Test
+    void relationshipStatus_returnsRequestedWhenPendingRequestExists() {
+        when(followRepository.existsByFollowerIdAndFollowingId(1L, 2L)).thenReturn(false);
+        when(followRequestRepository.existsByFollowerIdAndFollowingIdAndStatus(1L, 2L, Status.PENDING))
+            .thenReturn(true);
+
+        Map<String, Object> result = followService.getRelationshipStatus(1L, 2L);
+
+        assertEquals("REQUESTED", result.get("status"));
+        assertEquals(false, result.get("following"));
+        assertEquals(true, result.get("requested"));
+    }
+
+    @Test
+    void approveRequest_createsFollowAndReturnsApprovedStatus() {
+        FollowRequest request = new FollowRequest();
+        request.setRequestId(9L);
+        request.setFollowerId(1L);
+        request.setFollowingId(2L);
+        request.setStatus(Status.PENDING);
+        when(followRequestRepository.findById(9L)).thenReturn(Optional.of(request));
+        when(followRequestRepository.save(any(FollowRequest.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(followRepository.existsByFollowerIdAndFollowingId(1L, 2L)).thenReturn(false);
+        when(followRepository.save(any(Follow.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(restTemplate.getForObject("http://localhost:8081/auth/user/1", Map.class))
+            .thenReturn(Map.of("username", "ayush"));
+
+        Map<String, Object> result = followService.approveRequest(2L, 9L);
+
+        assertEquals("APPROVED", result.get("status"));
+        assertEquals(Status.APPROVED, request.getStatus());
+        verify(followRepository).save(any(Follow.class));
+    }
+
+    @Test
+    void approveRequest_rejectsWrongOwner() {
+        FollowRequest request = new FollowRequest();
+        request.setRequestId(9L);
+        request.setFollowerId(1L);
+        request.setFollowingId(2L);
+        when(followRequestRepository.findById(9L)).thenReturn(Optional.of(request));
+
+        assertThrows(RuntimeException.class, () -> followService.approveRequest(99L, 9L));
+
+        verify(followRepository, never()).save(any());
+    }
+
+    @Test
+    void rejectRequest_updatesStatus() {
+        FollowRequest request = new FollowRequest();
+        request.setRequestId(9L);
+        request.setFollowerId(1L);
+        request.setFollowingId(2L);
+        request.setStatus(Status.PENDING);
+        when(followRequestRepository.findById(9L)).thenReturn(Optional.of(request));
+        when(followRequestRepository.save(any(FollowRequest.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Map<String, Object> result = followService.rejectRequest(2L, 9L);
+
+        assertEquals("REJECTED", result.get("status"));
+        assertEquals(Status.REJECTED, request.getStatus());
+    }
 
     @Test
     void isMutual_bothFollow_returnsTrue() {
         when(followRepository.existsByFollowerIdAndFollowingId(1L, 2L)).thenReturn(true);
         when(followRepository.existsByFollowerIdAndFollowingId(2L, 1L)).thenReturn(true);
+
         assertTrue(followService.isMutual(1L, 2L));
     }
 
@@ -165,6 +246,18 @@ class FollowServiceTest {
     void isMutual_onlyOneFollows_returnsFalse() {
         when(followRepository.existsByFollowerIdAndFollowingId(1L, 2L)).thenReturn(true);
         when(followRepository.existsByFollowerIdAndFollowingId(2L, 1L)).thenReturn(false);
+
         assertFalse(followService.isMutual(1L, 2L));
+    }
+
+    @Test
+    void getSuggestedUsers_returnsFriendsOfFriendsExcludingSelfAndExistingFollows() {
+        when(followRepository.findDistinctFollowingIds(1L)).thenReturn(List.of(2L, 3L));
+        when(followRepository.findDistinctFollowingIds(2L)).thenReturn(List.of(1L, 4L, 5L));
+        when(followRepository.findDistinctFollowingIds(3L)).thenReturn(List.of(5L, 6L));
+
+        List<Long> suggestions = followService.getSuggestedUsers(1L);
+
+        assertEquals(List.of(4L, 5L, 6L), suggestions);
     }
 }

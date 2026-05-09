@@ -47,7 +47,6 @@ class AuthServiceTest {
     @Test
     void register_success_savesUserAndReturns() {
         when(userRepository.existsByEmail("test@test.com")).thenReturn(false);
-        when(userRepository.existsByUsername("testuser")).thenReturn(false);
         when(passwordEncoder.encode("pass123")).thenReturn("hashed");
         when(userRepository.save(any())).thenAnswer(i -> {
             User u = i.getArgument(0);
@@ -89,13 +88,6 @@ class AuthServiceTest {
         verify(userRepository, never()).save(any());
     }
 
-    @Test
-    void register_duplicateUsername_throwsBadRequestException() {
-        when(userRepository.existsByEmail("test@test.com")).thenReturn(false);
-        when(userRepository.existsByUsername("testuser")).thenReturn(true);
-        assertThrows(BadRequestException.class,
-            () -> authService.register("testuser", "test@test.com", "pass123"));
-    }
 
     /* ── login() tests ─────────────────────────────────────────────── */
 

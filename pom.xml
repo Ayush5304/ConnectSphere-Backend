@@ -34,6 +34,7 @@
         <sonar.organization>connectsphere</sonar.organization>
         <sonar.host.url>http://localhost:9000</sonar.host.url>
         <jacoco.version>0.8.11</jacoco.version>
+        <lombok.version>1.18.46</lombok.version>
     </properties>
 
     <dependencyManagement>
@@ -79,6 +80,13 @@
                     <version>3.13.0</version>
                     <configuration>
                         <release>21</release>
+                        <annotationProcessorPaths>
+                            <path>
+                                <groupId>org.projectlombok</groupId>
+                                <artifactId>lombok</artifactId>
+                                <version>${lombok.version}</version>
+                            </path>
+                        </annotationProcessorPaths>
                     </configuration>
                 </plugin>
             </plugins>
@@ -91,6 +99,21 @@
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
                 <version>${jacoco.version}</version>
+                <configuration>
+                    <includes>
+                        <include>com/connectsphere/**</include>
+                    </includes>
+                    <excludes>
+                        <exclude>**/*Application.class</exclude>
+                        <exclude>**/config/**</exclude>
+                        <exclude>**/controller/**</exclude>
+                        <exclude>**/dto/**</exclude>
+                        <exclude>**/entity/**</exclude>
+                        <exclude>**/exception/**</exclude>
+                        <exclude>**/repository/**</exclude>
+                        <exclude>**/security/**</exclude>
+                    </excludes>
+                </configuration>
                 <executions>
                     <!-- Prepares JaCoCo agent before tests run -->
                     <execution>
@@ -103,7 +126,36 @@
                         <phase>verify</phase>
                         <goals><goal>report</goal></goals>
                     </execution>
+                    <execution>
+                        <id>coverage-check</id>
+                        <phase>verify</phase>
+                        <goals><goal>check</goal></goals>
+                        <configuration>
+                            <rules>
+                                <rule>
+                                    <element>BUNDLE</element>
+                                    <limits>
+                                        <limit>
+                                            <counter>INSTRUCTION</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.80</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
+                    </execution>
                 </executions>
+            </plugin>
+
+            <!-- Test runner: keep JaCoCo argLine and allow Mockito/Byte Buddy on newer local JDKs -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.1.2</version>
+                <configuration>
+                    <argLine>${argLine} -Dnet.bytebuddy.experimental=true</argLine>
+                </configuration>
             </plugin>
 
             <!-- SonarQube Maven Plugin -->

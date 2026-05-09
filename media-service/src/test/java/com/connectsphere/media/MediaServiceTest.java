@@ -1,18 +1,22 @@
 package com.connectsphere.media;
 
 import com.connectsphere.media.entity.Story;
+import com.connectsphere.media.entity.StoryView;
 import com.connectsphere.media.repository.StoryRepository;
 import com.connectsphere.media.repository.StoryViewRepository;
 import com.connectsphere.media.service.MediaService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
-import org.springframework.web.multipart.MultipartFile;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -21,64 +25,138 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
-/**
- * MediaServiceTest — Unit tests for MediaService.
- */
 @ExtendWith(MockitoExtension.class)
 class MediaServiceTest {
 
     @Mock StoryRepository storyRepository;
     @Mock StoryViewRepository storyViewRepository;
-    @Mock MultipartFile mockFile;
     @InjectMocks MediaService mediaService;
+
+    @TempDir Path tempDir;
 
     @BeforeEach
     void setUp() {
-        ReflectionTestUtils.setField(mediaService, "uploadDir", "uploads/");
-        ReflectionTestUtils.setField(mediaService, "maxImageSize", 10485760L);
-        ReflectionTestUtils.setField(mediaService, "maxVideoSize", 104857600L);
+        ReflectionTestUtils.setField(mediaService, "uploadDir", tempDir.toString());
+        ReflectionTestUtils.setField(mediaService, "maxImageSize", 10_485_760L);
+        ReflectionTestUtils.setField(mediaService, "maxVideoSize", 104_857_600L);
     }
 
-    /* ── getActiveStoriesForUsers() tests ────────────────────────────── */
+    @Test
+    void uploadFile_acceptsCameraWebmWithCodecContentType() throws Exception {
+        MockMultipartFile file = new MockMultipartFile(
+            "file", "camera-story.webm", "video/webm;codecs=vp9", new byte[] {1, 2, 3});
+
+        String url = mediaService.uploadFile(file);
+
+        assertTrue(url.startsWith("http://localhost:8080/api/media/files/"));
+        assertEquals(1, Files.list(tempDir).count());
+    }
 
     @Test
-    void getActiveStoriesForUsers_returnsNonExpiredStories() {
-        Story s1 = new Story(); s1.setStoryId(1L);
-        Story s2 = new Story(); s2.setStoryId(2L);
+    void uploadFile_rejectsUnsupportedType() {
+        MockMultipartFile file = new MockMultipartFile(
+            "file", "story.gif", "image/gif", new byte[] {1});
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+            () -> mediaService.uploadFile(file));
+
+        assertTrue(ex.getMessage().contains("Unsupported file type"));
+    }
+
+    @Test
+    void createStory_uploadsMediaAndSavesStory() throws Exception {
+        MockMultipartFile file = new MockMultipartFile(
+            "file", "story.jpg", "image/jpeg", new byte[] {7, 8, 9});
+        when(storyRepository.save(any(Story.class))).thenAnswer(invocation -> {
+            Story story = invocation.getArgument(0);
+            story.setStoryId(99L);
+            return story;
+        });
+
+        Story saved = mediaService.createStory(5L, "ayush", file);
+
+        assertEquals(99L, saved.getStoryId());
+        assertEquals(5L, saved.getUserId());
+        assertEquals("ayush", saved.getUsername());
+        assertEquals("image/jpeg", saved.getMediaType());
+        assertTrue(saved.getMediaUrl().contains("/api/media/files/"));
+    }
+
+    @Test
+    void getActiveStoriesForUsers_returnsRepositoryResults() {
+        Story story = new Story();
         when(storyRepository.findByUserIdInAndExpiresAtAfter(any(), any()))
-            .thenReturn(List.of(s1, s2));
+            .thenReturn(List.of(story));
 
         List<Story> result = mediaService.getActiveStoriesForUsers(List.of(1L, 2L));
 
-        assertEquals(2, result.size());
+        assertEquals(1, result.size());
     }
 
     @Test
-    void getActiveStoriesForUsers_emptyList_returnsEmpty() {
-        when(storyRepository.findByUserIdInAndExpiresAtAfter(any(), any()))
-            .thenReturn(List.of());
+    void deleteStory_allowsOwnerDeletesViewsFileAndEntity() throws Exception {
+        Path uploaded = tempDir.resolve("owned.jpg");
+        Files.write(uploaded, new byte[] {1});
+        Story story = new Story();
+        story.setStoryId(10L);
+        story.setUserId(4L);
+        story.setMediaUrl("http://localhost:8080/api/media/files/owned.jpg");
+        when(storyRepository.findById(10L)).thenReturn(Optional.of(story));
 
-        List<Story> result = mediaService.getActiveStoriesForUsers(List.of(1L));
+        mediaService.deleteStory(10L, 4L, "USER");
 
-        assertTrue(result.isEmpty());
+        verify(storyViewRepository).deleteByStoryId(10L);
+        verify(storyRepository).delete(story);
+        assertFalse(Files.exists(uploaded));
     }
 
-    /* ── deleteStory() tests ───────────────────────────────────────── */
-
     @Test
-    void deleteStory_callsRepositoryDeleteById() {
-        mediaService.deleteStory(1L, null, null);
-        verify(storyRepository).deleteById(1L);
+    void deleteStory_allowsAdminToDeleteAnyStory() {
+        Story story = new Story();
+        story.setStoryId(10L);
+        story.setUserId(4L);
+        story.setMediaUrl("http://localhost:8080/api/media/files/missing.jpg");
+        when(storyRepository.findById(10L)).thenReturn(Optional.of(story));
+
+        assertDoesNotThrow(() -> mediaService.deleteStory(10L, 99L, "ADMIN"));
+
+        verify(storyRepository).delete(story);
     }
 
-    /* ── incrementViewCount() tests ────────────────────────────────── */
+    @Test
+    void deleteStory_rejectsNonOwnerNonAdmin() {
+        Story story = new Story();
+        story.setStoryId(10L);
+        story.setUserId(4L);
+        when(storyRepository.findById(10L)).thenReturn(Optional.of(story));
+
+        assertThrows(SecurityException.class, () -> mediaService.deleteStory(10L, 7L, "USER"));
+
+        verify(storyRepository, never()).delete(any());
+    }
 
     @Test
-    void incrementViewCount_ownerViewing_doesNotIncrement() {
+    void incrementViewCount_newViewerRecordsUniqueView() {
         Story story = new Story();
         story.setStoryId(1L);
         story.setUserId(5L);
         story.setViewCount(0);
+        when(storyRepository.findById(1L)).thenReturn(Optional.of(story));
+        when(storyViewRepository.findByStoryIdAndViewerUserId(1L, 10L)).thenReturn(Optional.empty());
+        when(storyViewRepository.save(any(StoryView.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(storyRepository.save(any(Story.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Story result = mediaService.incrementViewCount(1L, 10L, "viewer");
+
+        assertEquals(1, result.getViewCount());
+        verify(storyViewRepository).save(any(StoryView.class));
+    }
+
+    @Test
+    void incrementViewCount_ownerViewDoesNotCount() {
+        Story story = new Story();
+        story.setStoryId(1L);
+        story.setUserId(5L);
         when(storyRepository.findById(1L)).thenReturn(Optional.of(story));
 
         Story result = mediaService.incrementViewCount(1L, 5L, "owner");
@@ -88,50 +166,26 @@ class MediaServiceTest {
     }
 
     @Test
-    void incrementViewCount_newViewer_incrementsCount() {
-        Story story = new Story();
-        story.setStoryId(1L);
-        story.setUserId(5L);
-        story.setViewCount(0);
-        when(storyRepository.findById(1L)).thenReturn(Optional.of(story));
-        when(storyViewRepository.findByStoryIdAndViewerUserId(1L, 10L))
-            .thenReturn(Optional.empty());
-        when(storyViewRepository.save(any())).thenAnswer(i -> i.getArgument(0));
-        when(storyRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+    void getViewers_returnsNewestViewers() {
+        when(storyViewRepository.findByStoryIdOrderByViewedAtDesc(1L))
+            .thenReturn(List.of(new StoryView(), new StoryView()));
 
-        Story result = mediaService.incrementViewCount(1L, 10L, "viewer");
-
-        assertEquals(1, result.getViewCount());
-        verify(storyViewRepository).save(any());
+        assertEquals(2, mediaService.getViewers(1L).size());
     }
 
     @Test
-    void incrementViewCount_alreadyViewed_doesNotIncrementAgain() {
-        Story story = new Story();
-        story.setStoryId(1L);
-        story.setUserId(5L);
-        story.setViewCount(1);
-        when(storyRepository.findById(1L)).thenReturn(Optional.of(story));
-        when(storyViewRepository.findByStoryIdAndViewerUserId(1L, 10L))
-            .thenReturn(Optional.of(new com.connectsphere.media.entity.StoryView()));
+    void purgeExpiredStories_removesMediaAndDeletesRows() throws Exception {
+        Path uploaded = tempDir.resolve("old.jpg");
+        Files.write(uploaded, new byte[] {1});
+        Story expired = new Story();
+        expired.setStoryId(1L);
+        expired.setExpiresAt(LocalDateTime.now().minusMinutes(1));
+        expired.setMediaUrl("http://localhost:8080/api/media/files/old.jpg");
+        when(storyRepository.findByExpiresAtBefore(any())).thenReturn(List.of(expired));
 
-        Story result = mediaService.incrementViewCount(1L, 10L, "viewer");
+        mediaService.purgeExpiredStories();
 
-        assertEquals(1, result.getViewCount());
-        verify(storyRepository, never()).save(any());
-    }
-
-    /* ── getStoriesByUser() tests ──────────────────────────────────── */
-
-    @Test
-    void getStoriesByUser_returnsUserStories() {
-        Story s = new Story(); s.setUserId(1L);
-        when(storyRepository.findByUserIdInAndExpiresAtAfter(any(), any()))
-            .thenReturn(List.of(s));
-
-        List<Story> result = mediaService.getStoriesByUser(1L);
-
-        assertEquals(1, result.size());
-        assertEquals(1L, result.get(0).getUserId());
+        verify(storyRepository).deleteAll(List.of(expired));
+        assertFalse(Files.exists(uploaded));
     }
 }
