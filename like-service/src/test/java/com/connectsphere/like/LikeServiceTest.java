@@ -39,6 +39,7 @@ class LikeServiceTest {
         /* Inject @Value fields manually since Spring context is not loaded */
         ReflectionTestUtils.setField(likeService, "postServiceUrl", "http://localhost:8082");
         ReflectionTestUtils.setField(likeService, "frontendUrl", "http://localhost:3000");
+        ReflectionTestUtils.setField(likeService, "authServiceUrl", "http://localhost:8081");
     }
 
     /* ── react() tests ─────────────────────────────────────────────── */
@@ -178,4 +179,105 @@ class LikeServiceTest {
 
         assertFalse(result.isPresent());
     }
+
+    @Test
+    void react_nullTargetType_throwsBadRequestException() {
+        assertThrows(BadRequestException.class,
+            () -> likeService.react(1L, 10L, null, Like.ReactionType.LIKE));
+    }
+
+    @Test
+    void react_newPostReaction_notifiesOwnerWithActorUsername() {
+        when(likeRepository.findByUserIdAndTargetIdAndTargetType(5L, 50L, Like.TargetType.POST))
+            .thenReturn(Optional.empty());
+        when(likeRepository.save(any(Like.class))).thenAnswer(i -> i.getArgument(0));
+        when(restTemplate.getForObject("http://localhost:8082/posts/50", Map.class))
+            .thenReturn(Map.of("userId", 9));
+        when(restTemplate.getForObject("http://localhost:8081/auth/user/5", Map.class))
+            .thenReturn(Map.of("username", "ayush"));
+
+        Like result = likeService.react(5L, 50L, Like.TargetType.POST, Like.ReactionType.HAHA);
+
+        assertEquals(Like.ReactionType.HAHA, result.getReactionType());
+        verify(restTemplate).put(contains("/posts/50/likes/increment"), isNull());
+        verify(rabbitTemplate).convertAndSend(eq("connectsphere.events"), eq("like.created"), any(Map.class));
+    }
+
+    @Test
+    void react_newPostReaction_skipsOwnPostAndToleratesLookupFailure() {
+        when(likeRepository.findByUserIdAndTargetIdAndTargetType(anyLong(), anyLong(), eq(Like.TargetType.POST)))
+            .thenReturn(Optional.empty());
+        when(likeRepository.save(any(Like.class))).thenAnswer(i -> i.getArgument(0));
+        when(restTemplate.getForObject("http://localhost:8082/posts/51", Map.class))
+            .thenReturn(Map.of("userId", 5));
+
+        likeService.react(5L, 51L, Like.TargetType.POST, Like.ReactionType.SAD);
+        verify(rabbitTemplate, never()).convertAndSend(eq("connectsphere.events"), eq("like.created"), any(Map.class));
+
+        when(restTemplate.getForObject("http://localhost:8082/posts/52", Map.class))
+            .thenThrow(new RuntimeException("post down"));
+        Like result = likeService.react(5L, 52L, Like.TargetType.POST, Like.ReactionType.ANGRY);
+        assertEquals(Like.ReactionType.ANGRY, result.getReactionType());
+    }
+
+    @Test
+    void react_newPostReaction_toleratesIncrementAndActorLookupFailure() {
+        when(likeRepository.findByUserIdAndTargetIdAndTargetType(5L, 53L, Like.TargetType.POST))
+            .thenReturn(Optional.empty());
+        when(likeRepository.save(any(Like.class))).thenAnswer(i -> i.getArgument(0));
+        doThrow(new RuntimeException("post down")).when(restTemplate).put(contains("/posts/53/likes/increment"), isNull());
+        when(restTemplate.getForObject("http://localhost:8082/posts/53", Map.class))
+            .thenReturn(Map.of("userId", 9));
+        when(restTemplate.getForObject("http://localhost:8081/auth/user/5", Map.class))
+            .thenThrow(new RuntimeException("auth down"));
+
+        Like result = likeService.react(5L, 53L, Like.TargetType.POST, Like.ReactionType.WOW);
+
+        assertEquals(Like.ReactionType.WOW, result.getReactionType());
+        verify(rabbitTemplate).convertAndSend(eq("connectsphere.events"), eq("like.created"), any(Map.class));
+    }
+
+    @Test
+    void react_commentTarget_savesWithoutPostSideEffects() {
+        when(likeRepository.findByUserIdAndTargetIdAndTargetType(1L, 44L, Like.TargetType.COMMENT))
+            .thenReturn(Optional.empty());
+        when(likeRepository.save(any(Like.class))).thenAnswer(i -> i.getArgument(0));
+
+        Like result = likeService.react(1L, 44L, Like.TargetType.COMMENT, Like.ReactionType.LOVE);
+
+        assertEquals(Like.TargetType.COMMENT, result.getTargetType());
+        verifyNoInteractions(rabbitTemplate);
+        verify(restTemplate, never()).put(anyString(), any());
+    }
+
+    @Test
+    void unreact_postToleratesDecrementFailureAndCommentDoesNotCallPostService() {
+        Like postLike = new Like();
+        postLike.setTargetType(Like.TargetType.POST);
+        when(likeRepository.findByUserIdAndTargetIdAndTargetType(1L, 60L, Like.TargetType.POST))
+            .thenReturn(Optional.of(postLike));
+        doThrow(new RuntimeException("post down")).when(restTemplate).put(contains("/posts/60/likes/decrement"), isNull());
+
+        likeService.unreact(1L, 60L, Like.TargetType.POST);
+        verify(likeRepository).delete(postLike);
+
+        Like commentLike = new Like();
+        commentLike.setTargetType(Like.TargetType.COMMENT);
+        when(likeRepository.findByUserIdAndTargetIdAndTargetType(1L, 61L, Like.TargetType.COMMENT))
+            .thenReturn(Optional.of(commentLike));
+        likeService.unreact(1L, 61L, Like.TargetType.COMMENT);
+        verify(likeRepository).delete(commentLike);
+    }
+
+    @Test
+    void getReactions_returnsRepositoryList() {
+        Like like = new Like();
+        like.setReactionType(Like.ReactionType.LIKE);
+        when(likeRepository.findByTargetIdAndTargetType(70L, Like.TargetType.POST)).thenReturn(List.of(like));
+
+        List<Like> result = likeService.getReactions(70L, Like.TargetType.POST);
+
+        assertEquals(1, result.size());
+    }
+
 }

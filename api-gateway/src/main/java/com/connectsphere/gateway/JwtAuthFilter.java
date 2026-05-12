@@ -1,4 +1,4 @@
-﻿package com.connectsphere.gateway;
+package com.connectsphere.gateway;
 
 import io.jsonwebtoken.Claims;
 import org.springframework.beans.factory.annotation.Value;

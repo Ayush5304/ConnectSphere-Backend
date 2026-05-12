@@ -11,15 +11,19 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.ResponseEntity;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
+import org.mockito.ArgumentCaptor;
 
 /**
  * SearchServiceTest — Unit tests for SearchService.
@@ -143,4 +147,116 @@ class SearchServiceTest {
 
         verify(postHashtagRepository).findByTag("java");
     }
+
+    @Test
+    void indexHashtags_withoutPostId_indexesOnlyHashtag() {
+        when(hashtagRepository.findByTag("spring")).thenReturn(Optional.empty());
+        when(hashtagRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        searchService.indexHashtags("Learning #Spring");
+
+        verify(hashtagRepository).save(any(Hashtag.class));
+        verify(postHashtagRepository, never()).existsByPostIdAndTag(anyLong(), anyString());
+        verify(postHashtagRepository, never()).save(any());
+    }
+
+    @Test
+    void indexHashtags_multipleTagsLowercasesAndLinksEach() {
+        when(hashtagRepository.findByTag(anyString())).thenReturn(Optional.empty());
+        when(hashtagRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+        when(postHashtagRepository.existsByPostIdAndTag(eq(22L), anyString())).thenReturn(false);
+        when(postHashtagRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        searchService.indexHashtags("#Java #Spring_boot #JAVA", 22L);
+
+        ArgumentCaptor<Hashtag> tags = ArgumentCaptor.forClass(Hashtag.class);
+        verify(hashtagRepository, times(3)).save(tags.capture());
+        assertEquals(List.of("java", "spring_boot", "java"), tags.getAllValues().stream().map(Hashtag::getTag).toList());
+        verify(postHashtagRepository, times(3)).save(any(PostHashtag.class));
+    }
+
+    @Test
+    void search_returnsPostsHashtagsAndUsers() {
+        Hashtag tag = new Hashtag(); tag.setTag("java");
+        when(hashtagRepository.findByTagContainingIgnoreCase("java")).thenReturn(List.of(tag));
+        when(restTemplate.exchange(eq("http://localhost:8082/posts/search?keyword=java"), any(), isNull(), any(org.springframework.core.ParameterizedTypeReference.class)))
+            .thenReturn(ResponseEntity.ok(List.of(Map.of("postId", 1L))));
+        when(restTemplate.exchange(eq("http://localhost:8081/auth/search?query=java"), any(), isNull(), any(org.springframework.core.ParameterizedTypeReference.class)))
+            .thenReturn(ResponseEntity.ok(List.of(Map.of("userId", 2L, "username", "javauser"))));
+
+        Map<String, Object> result = searchService.search("java");
+
+        assertEquals(1, ((List<?>) result.get("posts")).size());
+        assertEquals(List.of(tag), result.get("hashtags"));
+        assertEquals(1, ((List<?>) result.get("users")).size());
+    }
+
+    @Test
+    void search_handlesRemoteFailuresAndNullBodies() {
+        Hashtag tag = new Hashtag(); tag.setTag("local");
+        when(hashtagRepository.findByTagContainingIgnoreCase("local")).thenReturn(List.of(tag));
+        when(restTemplate.exchange(eq("http://localhost:8082/posts/search?keyword=local"), any(), isNull(), any(org.springframework.core.ParameterizedTypeReference.class)))
+            .thenThrow(new RuntimeException("post down"));
+        when(restTemplate.exchange(eq("http://localhost:8081/auth/search?query=local"), any(), isNull(), any(org.springframework.core.ParameterizedTypeReference.class)))
+            .thenReturn(ResponseEntity.ok(null));
+
+        Map<String, Object> result = searchService.search("local");
+
+        assertTrue(((List<?>) result.get("posts")).isEmpty());
+        assertEquals(List.of(tag), result.get("hashtags"));
+        assertTrue(((List<?>) result.get("users")).isEmpty());
+    }
+
+    @Test
+    void search_handlesUserServiceFailure() {
+        when(hashtagRepository.findByTagContainingIgnoreCase("x")).thenReturn(List.of());
+        when(restTemplate.exchange(eq("http://localhost:8082/posts/search?keyword=x"), any(), isNull(), any(org.springframework.core.ParameterizedTypeReference.class)))
+            .thenReturn(ResponseEntity.ok(null));
+        when(restTemplate.exchange(eq("http://localhost:8081/auth/search?query=x"), any(), isNull(), any(org.springframework.core.ParameterizedTypeReference.class)))
+            .thenThrow(new RuntimeException("auth down"));
+
+        Map<String, Object> result = searchService.search("x");
+
+        assertTrue(((List<?>) result.get("posts")).isEmpty());
+        assertTrue(((List<?>) result.get("users")).isEmpty());
+    }
+
+    @Test
+    void getPostsByHashtag_emptyIds_returnsEmptyWithoutRemoteCall() {
+        when(postHashtagRepository.findByTag("empty")).thenReturn(List.of());
+
+        List<?> result = searchService.getPostsByHashtag("EMPTY");
+
+        assertTrue(result.isEmpty());
+        verify(restTemplate, never()).exchange(anyString(), any(), any(), any(org.springframework.core.ParameterizedTypeReference.class));
+    }
+
+    @Test
+    void getPostsByHashtag_fetchesPostsForIds() {
+        PostHashtag ph1 = new PostHashtag(); ph1.setPostId(3L); ph1.setTag("java");
+        PostHashtag ph2 = new PostHashtag(); ph2.setPostId(4L); ph2.setTag("java");
+        when(postHashtagRepository.findByTag("java")).thenReturn(List.of(ph1, ph2));
+        when(restTemplate.exchange(eq("http://localhost:8082/posts/feed/users"), any(), any(HttpEntity.class), any(org.springframework.core.ParameterizedTypeReference.class)))
+            .thenReturn(ResponseEntity.ok(List.of(Map.of("postId", 3L), Map.of("postId", 4L))));
+
+        List<?> result = searchService.getPostsByHashtag("java");
+
+        assertEquals(2, result.size());
+        ArgumentCaptor<HttpEntity> entity = ArgumentCaptor.forClass(HttpEntity.class);
+        verify(restTemplate).exchange(eq("http://localhost:8082/posts/feed/users"), any(), entity.capture(), any(org.springframework.core.ParameterizedTypeReference.class));
+        assertEquals(List.of(3L, 4L), entity.getValue().getBody());
+    }
+
+    @Test
+    void getPostsByHashtag_remoteFailureReturnsEmpty() {
+        PostHashtag ph = new PostHashtag(); ph.setPostId(3L); ph.setTag("java");
+        when(postHashtagRepository.findByTag("java")).thenReturn(List.of(ph));
+        when(restTemplate.exchange(eq("http://localhost:8082/posts/feed/users"), any(), any(HttpEntity.class), any(org.springframework.core.ParameterizedTypeReference.class)))
+            .thenThrow(new RuntimeException("post down"));
+
+        List<?> result = searchService.getPostsByHashtag("java");
+
+        assertTrue(result.isEmpty());
+    }
+
 }

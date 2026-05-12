@@ -64,6 +64,29 @@ class MediaServiceTest {
     }
 
     @Test
+    void uploadFile_rejectsAllowedTypeWithDisallowedExtension() {
+        MockMultipartFile file = new MockMultipartFile(
+            "file", "story.txt", "image/jpeg", new byte[] {1});
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+            () -> mediaService.uploadFile(file));
+
+        assertTrue(ex.getMessage().contains("extension"));
+    }
+
+    @Test
+    void uploadFile_rejectsOversizedVideo() {
+        ReflectionTestUtils.setField(mediaService, "maxVideoSize", 2L);
+        MockMultipartFile file = new MockMultipartFile(
+            "file", "story.mp4", "video/mp4", new byte[] {1, 2, 3});
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+            () -> mediaService.uploadFile(file));
+
+        assertTrue(ex.getMessage().contains("File too large"));
+    }
+
+    @Test
     void createStory_uploadsMediaAndSavesStory() throws Exception {
         MockMultipartFile file = new MockMultipartFile(
             "file", "story.jpg", "image/jpeg", new byte[] {7, 8, 9});
@@ -91,6 +114,17 @@ class MediaServiceTest {
         List<Story> result = mediaService.getActiveStoriesForUsers(List.of(1L, 2L));
 
         assertEquals(1, result.size());
+    }
+
+    @Test
+    void getStoriesByUser_returnsActiveStoriesForSingleUser() {
+        Story story = new Story();
+        when(storyRepository.findByUserIdInAndExpiresAtAfter(eq(List.of(5L)), any()))
+            .thenReturn(List.of(story));
+
+        List<Story> result = mediaService.getStoriesByUser(5L);
+
+        assertEquals(List.of(story), result);
     }
 
     @Test
@@ -136,6 +170,42 @@ class MediaServiceTest {
     }
 
     @Test
+    void deleteStory_missingStoryThrowsRuntimeException() {
+        when(storyRepository.findById(404L)).thenReturn(Optional.empty());
+
+        assertThrows(RuntimeException.class, () -> mediaService.deleteStory(404L, 1L, "ADMIN"));
+    }
+
+    @Test
+    void reportStory_usesProvidedReasonAndSaves() {
+        Story story = new Story();
+        when(storyRepository.findById(1L)).thenReturn(Optional.of(story));
+
+        mediaService.reportStory(1L, "spam");
+
+        assertTrue(story.isReported());
+        assertEquals("spam", story.getReportReason());
+        verify(storyRepository).save(story);
+    }
+
+    @Test
+    void reportStory_usesDefaultReasonWhenReasonIsNull() {
+        Story story = new Story();
+        when(storyRepository.findById(1L)).thenReturn(Optional.of(story));
+
+        mediaService.reportStory(1L, null);
+
+        assertEquals("Reported from story viewer", story.getReportReason());
+    }
+
+    @Test
+    void reportStory_missingStoryThrowsRuntimeException() {
+        when(storyRepository.findById(404L)).thenReturn(Optional.empty());
+
+        assertThrows(RuntimeException.class, () -> mediaService.reportStory(404L, "spam"));
+    }
+
+    @Test
     void incrementViewCount_newViewerRecordsUniqueView() {
         Story story = new Story();
         story.setStoryId(1L);
@@ -163,6 +233,30 @@ class MediaServiceTest {
 
         assertEquals(0, result.getViewCount());
         verify(storyViewRepository, never()).save(any());
+    }
+
+    @Test
+    void incrementViewCount_existingViewerDoesNotIncrementAgain() {
+        Story story = new Story();
+        story.setStoryId(1L);
+        story.setUserId(5L);
+        story.setViewCount(2);
+        when(storyRepository.findById(1L)).thenReturn(Optional.of(story));
+        when(storyViewRepository.findByStoryIdAndViewerUserId(1L, 10L))
+            .thenReturn(Optional.of(new StoryView()));
+
+        Story result = mediaService.incrementViewCount(1L, 10L, null);
+
+        assertEquals(2, result.getViewCount());
+        verify(storyViewRepository, never()).save(any());
+        verify(storyRepository, never()).save(any());
+    }
+
+    @Test
+    void incrementViewCount_missingStoryThrowsRuntimeException() {
+        when(storyRepository.findById(404L)).thenReturn(Optional.empty());
+
+        assertThrows(RuntimeException.class, () -> mediaService.incrementViewCount(404L, 10L, "viewer"));
     }
 
     @Test

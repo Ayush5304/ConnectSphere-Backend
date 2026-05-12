@@ -52,7 +52,8 @@ public class PaymentService {
     private static final int BOOST_POST_PRICE     = 4900;  // ₹49
 
     public CreateOrderResponse createOrder(String userEmail, CreateOrderRequest request) {
-        if ((userEmail == null || userEmail.isBlank()) && request != null) {
+        if (request == null) throw new BadRequestException("Payment request is required.");
+        if (userEmail == null || userEmail.isBlank()) {
             userEmail = request.getUserEmail();
         }
         if (request.getType() == null) throw new BadRequestException("Payment type is required.");

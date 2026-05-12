@@ -64,8 +64,9 @@ public class MediaService {
             );
         }
 
-        String originalName = file.getOriginalFilename() != null
-                ? file.getOriginalFilename().toLowerCase()
+        String rawOriginalName = file.getOriginalFilename();
+        String originalName = rawOriginalName != null
+                ? rawOriginalName.toLowerCase()
                 : "";
 
         boolean extOk = ALLOWED_EXTENSIONS.stream().anyMatch(originalName::endsWith);
@@ -85,8 +86,9 @@ public class MediaService {
     }
 
     private String safeFilename(MultipartFile file) {
-        String original = file.getOriginalFilename() != null
-                ? file.getOriginalFilename()
+        String rawOriginalName = file.getOriginalFilename();
+        String original = rawOriginalName != null
+                ? rawOriginalName
                 : "file";
 
         int dot = original.lastIndexOf('.');
@@ -121,8 +123,9 @@ public class MediaService {
         story.setUsername(username);
         story.setMediaUrl(url);
 
-        String storyType = file.getContentType() != null
-                ? file.getContentType().toLowerCase().split(";")[0].trim()
+        String rawContentType = file.getContentType();
+        String storyType = rawContentType != null
+                ? rawContentType.toLowerCase().split(";")[0].trim()
                 : "application/octet-stream";
 
         story.setMediaType(storyType);

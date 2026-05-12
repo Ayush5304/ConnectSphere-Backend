@@ -1,0 +1,5 @@
+com\connectsphere\gateway\JwtAuthFilter.class
+com\connectsphere\gateway\ApiGatewayApplication.class
+com\connectsphere\gateway\JwtAuthFilter$Config.class
+com\connectsphere\gateway\JwtUtil.class
+com\connectsphere\gateway\config\CorsConfig.class

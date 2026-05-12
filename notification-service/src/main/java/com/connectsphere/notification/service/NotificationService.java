@@ -1,4 +1,4 @@
-﻿package com.connectsphere.notification.service;
+package com.connectsphere.notification.service;
 
 import com.connectsphere.notification.entity.Notification;
 import com.connectsphere.notification.repository.NotificationRepository;

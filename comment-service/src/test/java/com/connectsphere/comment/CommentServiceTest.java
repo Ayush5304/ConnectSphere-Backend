@@ -16,6 +16,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -192,4 +193,106 @@ class CommentServiceTest {
         assertEquals(1, result.size());
         assertEquals(5L, result.get(0).getCommentId());
     }
+
+    @Test
+    void addComment_topLevelNotifiesPostOwnerWhenDifferentUser() {
+        Comment saved = comment(10L, 100L, 2L, "testuser");
+        when(commentRepository.save(any(Comment.class))).thenReturn(saved);
+        when(restTemplate.getForObject(contains("/posts/100"), eq(Map.class))).thenReturn(Map.of("userId", 7));
+
+        Comment result = commentService.addComment(100L, 2L, "testuser", "Nice", null);
+
+        assertEquals(10L, result.getCommentId());
+        verify(rabbitTemplate).convertAndSend(eq("connectsphere.events"), eq("comment.created"), any(Map.class));
+    }
+
+    @Test
+    void addComment_topLevelSkipsNotificationForOwnPostAndToleratesPostLookupFailure() {
+        when(commentRepository.save(any(Comment.class))).thenAnswer(i -> i.getArgument(0));
+        when(restTemplate.getForObject(contains("/posts/101"), eq(Map.class))).thenReturn(Map.of("userId", 2));
+
+        commentService.addComment(101L, 2L, "testuser", "Own post", null);
+
+        verify(rabbitTemplate, never()).convertAndSend(eq("connectsphere.events"), eq("comment.created"), any(Map.class));
+
+        when(restTemplate.getForObject(contains("/posts/102"), eq(Map.class))).thenThrow(new RuntimeException("post down"));
+        Comment result = commentService.addComment(102L, 2L, "testuser", "Still saves", null);
+        assertNotNull(result);
+    }
+
+    @Test
+    void addComment_incrementFailureStillSaves() {
+        when(commentRepository.save(any(Comment.class))).thenAnswer(i -> i.getArgument(0));
+        doThrow(new RuntimeException("post down")).when(restTemplate).put(contains("/posts/200/comments/increment"), isNull());
+
+        Comment result = commentService.addComment(200L, 2L, "testuser", "Nice", null);
+
+        assertEquals(200L, result.getPostId());
+    }
+
+    @Test
+    void addReply_notifiesParentAuthorWhenDifferentUser() {
+        Comment parent = comment(1L, 300L, 9L, "parent");
+        Comment saved = comment(2L, 300L, 2L, "replyUser");
+        saved.setParentCommentId(1L);
+        when(commentRepository.save(any(Comment.class))).thenReturn(saved);
+        when(commentRepository.findById(1L)).thenReturn(Optional.of(parent));
+
+        Comment result = commentService.addComment(300L, 2L, "replyUser", "reply", 1L);
+
+        assertEquals(1L, result.getParentCommentId());
+        verify(rabbitTemplate).convertAndSend(eq("connectsphere.events"), eq("reply.created"), any(Map.class));
+    }
+
+    @Test
+    void addReply_skipsSelfNotificationAndToleratesLookupFailure() {
+        Comment parent = comment(1L, 301L, 2L, "same");
+        when(commentRepository.save(any(Comment.class))).thenAnswer(i -> i.getArgument(0));
+        when(commentRepository.findById(1L)).thenReturn(Optional.of(parent));
+
+        commentService.addComment(301L, 2L, "same", "reply", 1L);
+
+        verify(rabbitTemplate, never()).convertAndSend(eq("connectsphere.events"), eq("reply.created"), any(Map.class));
+
+        when(commentRepository.findById(2L)).thenThrow(new RuntimeException("db down"));
+        Comment result = commentService.addComment(302L, 2L, "same", "reply", 2L);
+        assertEquals(302L, result.getPostId());
+    }
+
+    @Test
+    void adminQueryAndReportMethods_coverRemainingBranches() {
+        Comment c1 = comment(1L, 1L, 2L, "one");
+        Comment c2 = comment(2L, 1L, 3L, "two");
+        when(commentRepository.findAll()).thenReturn(List.of(c1, c2));
+        assertEquals(2, commentService.getAllComments().size());
+
+        assertThrows(BadRequestException.class, () -> commentService.reportComment(1L, ""));
+        when(commentRepository.findById(99L)).thenReturn(Optional.empty());
+        assertThrows(ResourceNotFoundException.class, () -> commentService.reportComment(99L, "spam"));
+        assertThrows(ResourceNotFoundException.class, () -> commentService.clearReport(99L));
+
+        when(commentRepository.findById(1L)).thenReturn(Optional.of(c1));
+        when(commentRepository.save(any(Comment.class))).thenAnswer(i -> i.getArgument(0));
+        commentService.reportComment(1L, "spam");
+        assertTrue(c1.isReported());
+        assertEquals("spam", c1.getReportReason());
+
+        commentService.clearReport(1L);
+        assertFalse(c1.isReported());
+        assertNull(c1.getReportReason());
+
+        when(commentRepository.findByReportedTrueOrderByCreatedAtDesc()).thenReturn(List.of(c2));
+        assertEquals(1, commentService.getReportedComments().size());
+    }
+
+    private Comment comment(Long id, Long postId, Long userId, String username) {
+        Comment comment = new Comment();
+        comment.setCommentId(id);
+        comment.setPostId(postId);
+        comment.setUserId(userId);
+        comment.setUsername(username);
+        comment.setContent("content");
+        return comment;
+    }
+
 }
