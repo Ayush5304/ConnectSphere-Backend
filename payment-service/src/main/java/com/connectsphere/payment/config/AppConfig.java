@@ -24,25 +24,17 @@ public class AppConfig {
     public RestTemplate restTemplate() { return new RestTemplate(); }
 
     /**
-     * BUG-FIX: Original bean threw RazorpayException at startup when keys were
-     * missing/blank, crashing the entire payment-service on first launch.
-     *
-     * Now: returns null when keys are not configured. PaymentService already
-     * validates keys before use and throws a user-friendly BadRequestException.
-     * The null client is never reached because that check comes first.
+     * Keep the service bootable without local Razorpay keys. PaymentService checks
+     * the configured key values before using the client and returns a clear error
+     * when payment features are not configured.
      */
     @Bean
-    public RazorpayClient razorpayClient() {
+    public RazorpayClient razorpayClient() throws RazorpayException {
         if (razorpayKeyId == null || razorpayKeyId.isBlank()
                 || razorpayKeySecret == null || razorpayKeySecret.isBlank()) {
             log.warn("Razorpay keys not configured. Payment features will return an error until RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are set.");
-            return null;
+            return new RazorpayClient("rzp_test_dummy", "dummy_secret");
         }
-        try {
-            return new RazorpayClient(razorpayKeyId, razorpayKeySecret);
-        } catch (RazorpayException e) {
-            log.error("Failed to initialize RazorpayClient: {}. Check your Razorpay keys.", e.getMessage());
-            return null;
-        }
+        return new RazorpayClient(razorpayKeyId, razorpayKeySecret);
     }
 }

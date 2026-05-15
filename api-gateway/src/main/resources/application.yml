@@ -2,83 +2,100 @@ server:
   port: 8080
 
 spring:
-  application:
-    name: api-gateway
-
   cloud:
     gateway:
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOrigins:
+              - "https://connect-sphere-frontend-kohl.vercel.app"
+              - "http://localhost:3000"
+              - "http://localhost:5173"
+            allowedMethods:
+              - GET
+              - POST
+              - PUT
+              - PATCH
+              - DELETE
+              - OPTIONS
+            allowedHeaders:
+              - "*"
+            exposedHeaders:
+              - Authorization
+            allowCredentials: true
+
       default-filters:
         - JwtAuthFilter
       routes:
 
         - id: auth-service
-          uri: http://localhost:8081
+          uri: http://auth-service:8081
           predicates:
             - Path=/api/auth/**
           filters:
-            - StripPrefix=1   # ✅ FIX
+            - StripPrefix=1   
 
         - id: auth-service-oauth2
-          uri: http://localhost:8081
+          uri: http://auth-service:8081
           predicates:
             - Path=/oauth2/**,/login/oauth2/**
 
         - id: post-service
-          uri: http://localhost:8082
+          uri: http://post-service:8082
           predicates:
             - Path=/api/posts/**
           filters:
             - StripPrefix=1
 
         - id: comment-service
-          uri: http://localhost:8083
+          uri: http://comment-service:8083
           predicates:
             - Path=/api/comments/**
           filters:
             - StripPrefix=1
 
         - id: like-service
-          uri: http://localhost:8084
+          uri: http://like-service:8084
           predicates:
             - Path=/api/likes/**
           filters:
             - StripPrefix=1
 
         - id: follow-service
-          uri: http://localhost:8085
+          uri: http://follow-service:8085
           predicates:
             - Path=/api/follows/**
           filters:
             - StripPrefix=1
 
         - id: notification-service
-          uri: http://localhost:8086
+          uri: http://notification-service:8086
           predicates:
             - Path=/api/notifications/**
           filters:
             - StripPrefix=1
 
         - id: media-service
-          uri: http://localhost:8087
+          uri: http://media-service:8087
           predicates:
             - Path=/api/media/**,/api/stories/**
           filters:
             - StripPrefix=1
 
         - id: media-service-legacy-files
-          uri: http://localhost:8087
+          uri: http://media-service:8087
           predicates:
             - Path=/media/files/**
 
         - id: search-service
-          uri: http://localhost:8088
+          uri: http://search-service:8088
           predicates:
             - Path=/api/search/**,/api/hashtags/**
           filters:
             - StripPrefix=1
 
         - id: payment-service
-          uri: http://localhost:8089
+          uri: http://payment-service:8089
           predicates:
             - Path=/api/payments/**
           filters:
@@ -92,7 +109,7 @@ jwt:
 eureka:
   client:
     service-url:
-      defaultZone: http://localhost:8761/eureka/
+      defaultZone: http://eureka-server:8761/eureka/
 
 # Logging
 logging:

@@ -1,0 +1,346 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: connectsphere-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-connectsphere}
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - connectsphere-net
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: connectsphere-rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - connectsphere-net
+
+  eureka-server:
+    build:
+      context: .
+      dockerfile: eureka-server/Dockerfile
+    image: connectsphere/eureka-server:latest
+    pull_policy: build
+    container_name: connectsphere-eureka-server
+    restart: unless-stopped
+    ports:
+      - "8761:8761"
+    environment:
+      EUREKA_CLIENT_REGISTER_WITH_EUREKA: "false"
+      EUREKA_CLIENT_FETCH_REGISTRY: "false"
+    networks:
+      - connectsphere-net
+
+  admin-server:
+    build:
+      context: .
+      dockerfile: admin-server/Dockerfile
+    image: connectsphere/admin-server:latest
+    pull_policy: build
+    container_name: connectsphere-admin-server
+    restart: unless-stopped
+    depends_on:
+      - eureka-server
+    ports:
+      - "8090:8090"
+    environment:
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+      ADMIN_SERVER_USERNAME: ${ADMIN_SERVER_USERNAME:-0191cs221060@technocratsgroup.edu.in}
+      ADMIN_SERVER_PASSWORD: ${ADMIN_SERVER_PASSWORD:-admin123}
+    networks:
+      - connectsphere-net
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: api-gateway/Dockerfile
+    image: connectsphere/api-gateway:latest
+    pull_policy: build
+    container_name: connectsphere-api-gateway
+    restart: unless-stopped
+    depends_on:
+      - eureka-server
+      - auth-service
+      - post-service
+      - comment-service
+      - like-service
+      - follow-service
+      - notification-service
+      - media-service
+      - search-service
+      - payment-service
+    ports:
+      - "8080:8080"
+    environment:
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+    networks:
+      - connectsphere-net
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: auth-service/Dockerfile
+    image: connectsphere/auth-service:latest
+    pull_policy: build
+    container_name: connectsphere-auth-service
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      eureka-server:
+        condition: service_started
+    ports:
+      - "8081:8081"
+    environment:
+      DB_USERNAME: root
+      DB_PASSWORD: ${DB_PASSWORD:-connectsphere}
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/authdb?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+      APP_FRONTEND_URL: ${APP_FRONTEND_URL:-http://localhost:3000}
+      SMTP_EMAIL: ${SMTP_EMAIL:-}
+      SMTP_APP_PASSWORD: ${SMTP_APP_PASSWORD:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-dummy-google-client-id}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-dummy-google-client-secret}
+    networks:
+      - connectsphere-net
+
+  post-service:
+    build:
+      context: .
+      dockerfile: post-service/Dockerfile
+    image: connectsphere/post-service:latest
+    pull_policy: build
+    container_name: connectsphere-post-service
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      eureka-server:
+        condition: service_started
+    ports:
+      - "8082:8082"
+    environment:
+      DB_USERNAME: root
+      DB_PASSWORD: ${DB_PASSWORD:-connectsphere}
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/connectsphere_post_db?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+      AUTH_SERVICE_URL: http://auth-service:8081
+      SEARCH_SERVICE_URL: http://search-service:8088
+    networks:
+      - connectsphere-net
+
+  comment-service:
+    build:
+      context: .
+      dockerfile: comment-service/Dockerfile
+    image: connectsphere/comment-service:latest
+    pull_policy: build
+    container_name: connectsphere-comment-service
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      eureka-server:
+        condition: service_started
+    ports:
+      - "8083:8083"
+    environment:
+      DB_USERNAME: root
+      DB_PASSWORD: ${DB_PASSWORD:-connectsphere}
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/connectsphere_comment_db?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+      AUTH_SERVICE_URL: http://auth-service:8081
+      POST_SERVICE_URL: http://post-service:8082
+    networks:
+      - connectsphere-net
+
+  like-service:
+    build:
+      context: .
+      dockerfile: like-service/Dockerfile
+    image: connectsphere/like-service:latest
+    pull_policy: build
+    container_name: connectsphere-like-service
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      eureka-server:
+        condition: service_started
+    ports:
+      - "8084:8084"
+    environment:
+      DB_USERNAME: root
+      DB_PASSWORD: ${DB_PASSWORD:-connectsphere}
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/connectsphere_like_db?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+      AUTH_SERVICE_URL: http://auth-service:8081
+      POST_SERVICE_URL: http://post-service:8082
+    networks:
+      - connectsphere-net
+
+  follow-service:
+    build:
+      context: .
+      dockerfile: follow-service/Dockerfile
+    image: connectsphere/follow-service:latest
+    pull_policy: build
+    container_name: connectsphere-follow-service
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      eureka-server:
+        condition: service_started
+    ports:
+      - "8085:8085"
+    environment:
+      DB_USERNAME: root
+      DB_PASSWORD: ${DB_PASSWORD:-connectsphere}
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/connectsphere_follow_db?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+      AUTH_SERVICE_URL: http://auth-service:8081
+      NOTIFICATION_SERVICE_URL: http://notification-service:8086
+    networks:
+      - connectsphere-net
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: notification-service/Dockerfile
+    image: connectsphere/notification-service:latest
+    pull_policy: build
+    container_name: connectsphere-notification-service
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      eureka-server:
+        condition: service_started
+    ports:
+      - "8086:8086"
+    environment:
+      DB_USERNAME: root
+      DB_PASSWORD: ${DB_PASSWORD:-connectsphere}
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/connectsphere_notification_db?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: 5672
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+      AUTH_SERVICE_URL: http://auth-service:8081
+      POST_SERVICE_URL: http://post-service:8082
+      COMMENT_SERVICE_URL: http://comment-service:8083
+      LIKE_SERVICE_URL: http://like-service:8084
+      FOLLOW_SERVICE_URL: http://follow-service:8085
+      SMTP_EMAIL: ${SMTP_EMAIL:-}
+      SMTP_APP_PASSWORD: ${SMTP_APP_PASSWORD:-}
+    networks:
+      - connectsphere-net
+
+  media-service:
+    build:
+      context: .
+      dockerfile: media-service/Dockerfile
+    image: connectsphere/media-service:latest
+    pull_policy: build
+    container_name: connectsphere-media-service
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      eureka-server:
+        condition: service_started
+    ports:
+      - "8087:8087"
+    environment:
+      DB_USERNAME: root
+      DB_PASSWORD: ${DB_PASSWORD:-connectsphere}
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/connectsphere_media_db?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+      AUTH_SERVICE_URL: http://auth-service:8081
+      POST_SERVICE_URL: http://post-service:8082
+      MEDIA_UPLOAD_DIR: /app/uploads
+    volumes:
+      - media-uploads:/app/uploads
+    networks:
+      - connectsphere-net
+
+  search-service:
+    build:
+      context: .
+      dockerfile: search-service/Dockerfile
+    image: connectsphere/search-service:latest
+    pull_policy: build
+    container_name: connectsphere-search-service
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      eureka-server:
+        condition: service_started
+    ports:
+      - "8088:8088"
+    environment:
+      DB_USERNAME: root
+      DB_PASSWORD: ${DB_PASSWORD:-connectsphere}
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/connectsphere_search_db?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+      AUTH_SERVICE_URL: http://auth-service:8081
+      POST_SERVICE_URL: http://post-service:8082
+    networks:
+      - connectsphere-net
+
+  payment-service:
+    build:
+      context: .
+      dockerfile: payment-service/Dockerfile
+    image: connectsphere/payment-service:latest
+    pull_policy: build
+    container_name: connectsphere-payment-service
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      eureka-server:
+        condition: service_started
+    ports:
+      - "8089:8089"
+    environment:
+      DB_USERNAME: root
+      DB_PASSWORD: ${DB_PASSWORD:-connectsphere}
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/paymentdb?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+      AUTH_SERVICE_URL: http://auth-service:8081
+      POST_SERVICE_URL: http://post-service:8082
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
+    networks:
+      - connectsphere-net
+
+networks:
+  connectsphere-net:
+    driver: bridge
+
+volumes:
+  mysql-data:
+  media-uploads:
