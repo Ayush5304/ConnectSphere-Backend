@@ -1,0 +1,40 @@
+server:
+  port: 8084
+
+spring:
+  application:
+    name: like-service
+
+  datasource:
+    url: jdbc:mysql://localhost:3306/connectsphere_like_db?createDatabaseIfNotExist=true
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:your_password}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+
+# Eureka Configuration
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+
+  instance:
+    prefer-ip-address: true
+
+# 🔗 Inter-service communication
+auth:
+  service:
+    url: http://localhost:8081
+
+post:
+  service:
+    url: http://localhost:8082
+
+# Logging
+logging:
+  level:
+    com.connectsphere: DEBUG

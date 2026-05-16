@@ -1,0 +1,20 @@
+# Git / IDE
+.git
+.gitignore
+.metadata
+.sonarlint
+.idea
+.vscode
+*.iml
+.settings
+.classpath
+.project
+
+# Build output
+**/target
+**/bin
+
+# Logs and local files
+*.log
+*.tmp
+uploads
