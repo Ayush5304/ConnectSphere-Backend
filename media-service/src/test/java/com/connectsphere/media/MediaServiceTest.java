@@ -39,6 +39,7 @@ class MediaServiceTest {
         ReflectionTestUtils.setField(mediaService, "uploadDir", tempDir.toString());
         ReflectionTestUtils.setField(mediaService, "maxImageSize", 10_485_760L);
         ReflectionTestUtils.setField(mediaService, "maxVideoSize", 104_857_600L);
+        ReflectionTestUtils.setField(mediaService, "publicUrlPrefix", "/media/files");
     }
 
     @Test
@@ -48,7 +49,7 @@ class MediaServiceTest {
 
         String url = mediaService.uploadFile(file);
 
-        assertTrue(url.startsWith("http://localhost:8080/api/media/files/"));
+        assertTrue(url.startsWith("/media/files/"));
         assertEquals(1, Files.list(tempDir).count());
     }
 
@@ -102,7 +103,7 @@ class MediaServiceTest {
         assertEquals(5L, saved.getUserId());
         assertEquals("ayush", saved.getUsername());
         assertEquals("image/jpeg", saved.getMediaType());
-        assertTrue(saved.getMediaUrl().contains("/api/media/files/"));
+        assertTrue(saved.getMediaUrl().contains("/media/files/"));
     }
 
     @Test

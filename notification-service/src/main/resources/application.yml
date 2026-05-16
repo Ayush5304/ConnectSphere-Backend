@@ -29,8 +29,8 @@ spring:
             enable: true
 
   rabbitmq:
-    host: localhost
-    port: 5672
+    host: ${SPRING_RABBITMQ_HOST:localhost}
+    port: ${SPRING_RABBITMQ_PORT:5672}
 
 eureka:
   client:

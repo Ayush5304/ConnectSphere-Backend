@@ -1,5 +1,5 @@
 server:
-  port: 8761   # Eureka server runs on this port
+  port: 8761
 
 spring:
   application:
@@ -7,7 +7,11 @@ spring:
 
 eureka:
   client:
-    register-with-eureka: false   # ❌ Do NOT register itself
-    fetch-registry: false         # ❌ Do NOT fetch registry
+    register-with-eureka: false
+    fetch-registry: false
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+
   server:
+    enable-self-preservation: false
     wait-time-in-ms-when-sync-empty: 0

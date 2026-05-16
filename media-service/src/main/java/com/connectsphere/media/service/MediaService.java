@@ -39,6 +39,9 @@ public class MediaService {
     @Value("${media.max-video-size:104857600}")
     private long maxVideoSize;
 
+    @Value("${media.public-url-prefix:/media/files}")
+    private String publicUrlPrefix;
+
     private static final Map<String, String> ALLOWED_TYPES = Map.of(
             "image/jpeg", "image",
             "image/png", "image",
@@ -112,7 +115,11 @@ public class MediaService {
 
         Files.write(dest, file.getBytes());
 
-        return "http://localhost:8080/api/media/files/" + filename;
+        String normalizedPrefix = publicUrlPrefix.endsWith("/")
+                ? publicUrlPrefix.substring(0, publicUrlPrefix.length() - 1)
+                : publicUrlPrefix;
+
+        return normalizedPrefix + "/" + filename;
     }
 
     public Story createStory(Long userId, String username, MultipartFile file) throws IOException {
