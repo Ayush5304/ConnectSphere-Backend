@@ -1,0 +1,120 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: api-gateway
+
+  cloud:
+    gateway:
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOrigins:
+              - "https://connect-sphere-frontend-kohl.vercel.app"
+              - "http://localhost:3000"
+              - "http://localhost:5173"
+            allowedMethods:
+              - GET
+              - POST
+              - PUT
+              - PATCH
+              - DELETE
+              - OPTIONS
+            allowedHeaders:
+              - "*"
+            exposedHeaders:
+              - Authorization
+            allowCredentials: true
+
+      default-filters:
+        - JwtAuthFilter
+      routes:
+
+        - id: auth-service
+          uri: lb://AUTH-SERVICE
+          predicates:
+            - Path=/api/auth/**
+          filters:
+            - StripPrefix=1   
+
+        - id: auth-service-oauth2
+          uri: lb://AUTH-SERVICE
+          predicates:
+            - Path=/oauth2/**,/login/oauth2/**
+
+        - id: post-service
+          uri: lb://POST-SERVICE
+          predicates:
+            - Path=/api/posts/**
+          filters:
+            - StripPrefix=1
+
+        - id: comment-service
+          uri: lb://COMMENT-SERVICE
+          predicates:
+            - Path=/api/comments/**
+          filters:
+            - StripPrefix=1
+
+        - id: like-service
+          uri: lb://LIKE-SERVICE
+          predicates:
+            - Path=/api/likes/**
+          filters:
+            - StripPrefix=1
+
+        - id: follow-service
+          uri: lb://FOLLOW-SERVICE
+          predicates:
+            - Path=/api/follows/**
+          filters:
+            - StripPrefix=1
+
+        - id: notification-service
+          uri: lb://NOTIFICATION-SERVICE
+          predicates:
+            - Path=/api/notifications/**
+          filters:
+            - StripPrefix=1
+
+        - id: media-service
+          uri: lb://MEDIA-SERVICE
+          predicates:
+            - Path=/api/media/**,/api/stories/**
+          filters:
+            - StripPrefix=1
+
+        - id: media-service-legacy-files
+          uri: lb://MEDIA-SERVICE
+          predicates:
+            - Path=/media/files/**
+
+        - id: search-service
+          uri: lb://SEARCH-SERVICE
+          predicates:
+            - Path=/api/search/**,/api/hashtags/**
+          filters:
+            - StripPrefix=1
+
+        - id: payment-service
+          uri: lb://PAYMENT-SERVICE
+          predicates:
+            - Path=/api/payments/**
+          filters:
+            - StripPrefix=1
+
+# JWT
+jwt:
+  secret: connectsphere-local-jwt-secret-key-2026-change-me-minimum-32-chars
+
+# Eureka
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+
+# Logging
+logging:
+  level:
+    org.springframework.cloud.gateway: DEBUG
